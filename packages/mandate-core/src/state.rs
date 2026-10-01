@@ -131,7 +131,7 @@ impl Entry {
     field!(required, set_required, i128);
 }
 
-/// The per-executor record between the first `Open` and `Close` of a transaction.
+/// The per-executor record between an exchange's first `Open` and the `Close` of a transaction.
 #[repr(C)]
 pub struct Session {
     tag: [u8; 1],

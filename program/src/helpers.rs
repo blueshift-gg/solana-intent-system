@@ -12,8 +12,9 @@ use pinocchio::{
     ProgramResult,
 };
 
-/// Open and Close read the instructions sysvar, which describes top-level
-/// instructions only; a CPI caller could otherwise wrap them in its own logic.
+/// An exchange's Open and its Close read the instructions sysvar, which
+/// describes top-level instructions only; a CPI caller could otherwise wrap
+/// them in its own logic. A payment has no Close and skips this.
 #[inline(always)]
 pub fn check_top_level() -> ProgramResult {
     #[cfg(target_os = "solana")]

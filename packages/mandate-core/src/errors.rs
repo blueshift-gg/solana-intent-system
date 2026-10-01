@@ -48,11 +48,11 @@ pub enum MandateError {
     /// The account is not the one that paid the rent being refunded
     InvalidPayer,
 
-    /// Open and Close must be top-level instructions
+    /// An exchange's Open and its Close must be top-level instructions
     NotTopLevel,
     /// The transaction does not hold exactly one Close for this session
     InvalidSession,
-    /// The session holds too many mandates or entries
+    /// The session watches too many token accounts
     SessionFull,
     /// A payment's destination could count toward another mandate's
     /// requirement, so payments and sessions never share a transaction
@@ -63,7 +63,7 @@ pub enum MandateError {
     BudgetExceeded,
     /// A target is not a token account of the stated mint and owner
     InvalidTarget,
-    /// A bound or budget overflowed
+    /// A bound or limit overflowed
     Overflow,
     /// An outcome the mandates require does not hold at Close
     OutcomeNotMet,

@@ -631,6 +631,129 @@ fn random_pulls_never_pass_a_limit() {
     assert_eq!(f.balance(&merchant.usdc), paid);
 }
 
+/// A reference model of the session, run against the program on random
+/// pairs of exchanges settled in one transaction: pulls go to the counterparty
+/// or to the solver, the solver adds what it likes, and the second mandate
+/// either nets against the first or requires the very same account. `Close`
+/// passes exactly when every account gained the sum of what was required of it.
+#[test]
+fn random_settlements_pass_exactly_when_every_requirement_is_met() {
+    use std::collections::HashMap;
+
+    let mut seed = 0xD1B5_4A32_D192_ED03u64;
+    let mut random = |below: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % below
+    };
+
+    let mut f = Fixture::new();
+    let (alice, bob) = (f.wallet(1 << 40, 1 << 40), f.wallet(1 << 40, 1 << 40));
+    let solver = f.wallet(1 << 40, 1 << 40);
+    let (usdc, sol) = (f.usdc.to_bytes(), f.sol.to_bytes());
+    let (a, b) = (alice.address().to_bytes(), bob.address().to_bytes());
+    let (a_usdc, a_sol) = (alice.usdc.to_bytes(), alice.sol.to_bytes());
+    let (b_usdc, b_sol) = (bob.usdc.to_bytes(), bob.sol.to_bytes());
+    let s = solver.address();
+    let users = [alice.usdc, alice.sol, bob.usdc, bob.sol];
+    let (mut passed, mut failed) = (0, 0);
+
+    for scenario in 0..200 {
+        // Alice sells USDC for SOL. Bob either sells SOL for USDC, or sells
+        // USDC and requires Alice's SOL account to gain as well
+        let shared = random(2) == 0;
+        let (alice_max, bob_max) = (1 + random(1_000), 1 + random(1_000));
+        let (alice_wants, bob_wants) = (1 + random(1_000), 1 + random(1_000));
+        let alice_takes = [take(&a_usdc, &usdc, alice_max, Refill::Never)];
+        let alice_requires = [gain(&a_sol, &sol, &a, Bound::Const(alice_wants))];
+        let bob_takes = match shared {
+            true => [take(&b_usdc, &usdc, bob_max, Refill::Never)],
+            false => [take(&b_sol, &sol, bob_max, Refill::Never)],
+        };
+        let bob_requires = match shared {
+            true => [gain(&a_sol, &sol, &a, Bound::Const(bob_wants))],
+            false => [gain(&b_usdc, &usdc, &b, Bound::Const(bob_wants))],
+        };
+        // A distinct expiry makes each scenario a distinct pair of mandates
+        let expiry = Some(NOW + 10_000_000 + scenario);
+        let alice_bytes = encode(&terms(&a, true, expiry, &alice_takes, &alice_requires));
+        let bob_bytes = encode(&terms(&b, true, expiry, &bob_takes, &bob_requires));
+        for (wallet, bytes) in [(&alice, &alice_bytes), (&bob, &bob_bytes)] {
+            let create = create_mandate(&wallet.address(), &wallet.address(), bytes, None);
+            f.send(&[create], &[&wallet.key]).unwrap();
+        }
+
+        // Each pull goes to the counterparty or to the solver, and may exceed its limit
+        let (alice_pull, bob_pull) = (random(alice_max + 100), random(bob_max + 100));
+        let alice_to = [bob.usdc, solver.usdc][random(2) as usize];
+        let (bob_from, bob_to) = match shared {
+            true => (bob.usdc, [alice.usdc, solver.usdc][random(2) as usize]),
+            false => (bob.sol, [alice.sol, solver.sol][random(2) as usize]),
+        };
+        // The solver tops up what the mandates require, sometimes short
+        let (to_alice_sol, to_bob_usdc) = (random(2_200), random(1_100));
+
+        // The model: every account's change, against the sum required of it
+        let mut change: HashMap<Address, i128> = HashMap::new();
+        let mut required: HashMap<Address, i128> = HashMap::new();
+        for (from, to, amount) in [
+            (alice.usdc, alice_to, alice_pull),
+            (bob_from, bob_to, bob_pull),
+        ] {
+            *change.entry(from).or_default() -= amount as i128;
+            *change.entry(to).or_default() += amount as i128;
+            *required.entry(from).or_default() -= amount as i128;
+        }
+        *change.entry(alice.sol).or_default() += to_alice_sol as i128;
+        *change.entry(bob.usdc).or_default() += to_bob_usdc as i128;
+        *required.entry(alice.sol).or_default() += alice_wants as i128;
+        let bob_target = if shared { alice.sol } else { bob.usdc };
+        *required.entry(bob_target).or_default() += bob_wants as i128;
+        let within = alice_pull <= alice_max && bob_pull <= bob_max;
+        let met = (required.iter()).all(|(k, r)| change.get(k).copied().unwrap_or(0) >= *r);
+
+        let accounts = [users.as_slice(), &[solver.usdc, solver.sol]].concat();
+        let extra = || extra(&accounts, &[f.usdc, f.sol, TOKEN]);
+        let settle = [
+            open(
+                &s,
+                &s,
+                &alice.address(),
+                &alice_bytes,
+                extra(),
+                &[(alice.usdc, alice_to, alice_pull)],
+            ),
+            open(
+                &s,
+                &s,
+                &bob.address(),
+                &bob_bytes,
+                extra(),
+                &[(bob_from, bob_to, bob_pull)],
+            ),
+            transfer(&solver.sol, &f.sol, &alice.sol, &s, to_alice_sol, 9),
+            transfer(&solver.usdc, &f.usdc, &bob.usdc, &s, to_bob_usdc, 6),
+            close(&s, &users),
+        ];
+        let accepted = f.send(&settle, &[&solver.key]).is_ok();
+        assert_eq!(
+            accepted,
+            within && met,
+            "scenario {scenario}, shared {shared}"
+        );
+        match accepted {
+            true => passed += 1,
+            false => failed += 1,
+        }
+    }
+    // The run must exercise both outcomes to mean anything
+    assert!(
+        passed > 20 && failed > 20,
+        "{passed} passed, {failed} failed"
+    );
+}
+
 #[test]
 fn engine_constant_is_the_derived_pda() {
     assert_eq!(pda(&[ENGINE_SEED]), ENGINE_KEY);

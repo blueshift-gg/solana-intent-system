@@ -1,8 +1,9 @@
-//! The session: one per transaction, between the first `Open` of
-//! an exchange and the single `Close`. An account is snapshotted the first time a mandate
-//! names it or a pull pays into it, whichever comes first, and bounds on it
+//! The session: one per transaction, between the first `Open` of an exchange
+//! and the single `Close`. An account is snapshotted the first time a mandate
+//! requires it or a pull touches it, whichever comes first, and bounds on it
 //! are summed: one deposit can never satisfy two mandates, and one mandate's
-//! pull still counts toward another's requirement, so mandates net.
+//! pull still counts toward another's requirement, so mandates net. Payments
+//! never enter it.
 
 use crate::helpers::{balance, find};
 use crate::state::{Load, Session};

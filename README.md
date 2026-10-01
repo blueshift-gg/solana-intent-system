@@ -94,13 +94,15 @@ LiteSVM, whole transaction:
 
 | | CU |
 |---|---|
-| Payment, `Open` | 5.4k |
-| Signed payment, first time: `CreateMandate` + `Open` | 75k |
-| Exchange between two intents on chain, `Open` + `Open` + `Close` | 19k |
-| Signed swap: `CreateMandate`, `Open`, the solver's transfer, `Close` | 92k to 106k |
+| Payment, `Open` | 5.5k |
+| Payment, `Open` called by another program | 8.2k |
+| Signed payment, first time: `CreateMandate` + `Open` | 72k to 80k |
+| Exchange between two intents on chain, `Open` + `Open` + `Close` | 19k to 25k |
+| Signed swap: `CreateMandate`, `Open`, the solver's transfer, `Close` | 92k to 108k |
 
-The signature is verified once, with SHA-512 and Ed25519 in-program. The spread is PDA
-bump search.
+The signature is verified once, with SHA-512 and Ed25519 in-program. The ranges are PDA
+bump search, which every account creation pays: the intent's account, and an executor's
+session the first time it settles an exchange.
 
 ## Limits
 

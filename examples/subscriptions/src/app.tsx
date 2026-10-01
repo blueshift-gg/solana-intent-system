@@ -254,15 +254,15 @@ function Checkout({ config, plan, onConnect, close, done }: { config: Config; pl
             if (!token.exists || token.data.amount < BigInt(plan.price)) throw new Error(`Your wallet needs at least ${usd(plan.price)} in USDC`);
             const enabled = token.data.delegate.__option === 'Some' && token.data.delegate.value === ENGINE_ADDRESS;
             const enable = enabled ? [] : [getApproveInstruction({ amount: U64_MAX, delegate: ENGINE_ADDRESS, owner: signer, source })];
-            // Best first: the wallet renders the terms; else it signs our text; else it signs a transaction
+            // Best first: the wallet renders the terms; else it signs our text; else it signs a transaction.
+            // Either way the approval lasts a year: an expiry is what returns the mandate's rent
             const how = ([SIGN_MANDATE, SIGN_OFFCHAIN] as const).find((f) => account.features.includes(f));
             const signs = !!how;
             const start = await now();
-            // Signed approvals carry an expiry and renew yearly; created ones run until cancelled
             const terms = encode(subscriptionTerms({
                 account: source,
                 amount: BigInt(plan.price),
-                end: signs ? start + 365 * DAY : undefined,
+                end: start + 365 * DAY,
                 epoch: await fetchEpoch(rpc, me),
                 merchantAccount: config.merchantUsdc,
                 mint: USDC,

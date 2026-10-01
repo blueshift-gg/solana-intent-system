@@ -6,7 +6,7 @@ members = ["program", "packages/mandate-core", "packages/mandate-wasm", "tests",
 mandate-core = { path = "packages/mandate-core", version = "0.0.1" }
 pinocchio = { version = "=0.8.4", default-features = false }
 
-# Budgets and bounds use checked arithmetic as well as runtime overflow checks.
+# Limits and bounds use checked arithmetic as well as runtime overflow checks.
 [profile.release]
 overflow-checks = true
 

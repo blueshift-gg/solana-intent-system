@@ -32,7 +32,7 @@ fn process_instruction(
     instruction_data: &[u8],
 ) -> ProgramResult {
     match instruction_data.split_first() {
-        // Executor Instructions - Discriminators from 20. Open and Close run on every fill.
+        // Executor Instructions - Discriminators from 20. Open runs on every pull.
         Some((Open::DISCRIMINATOR, data)) => Open::try_from((data, accounts))?.process(),
         Some((Close::DISCRIMINATOR, _)) => Close::try_from(accounts)?.process(),
         Some((CloseMandate::DISCRIMINATOR, _)) => CloseMandate::try_from(accounts)?.process(),
