@@ -1,0 +1,25 @@
+[package]
+name = "mandate-tests"
+version = "0.0.1"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ed25519-dalek = "2"
+litesvm = "0.16"
+litesvm-token = "0.16"
+mandate-core = { workspace = true, features = ["localnet", "std"] }
+sha2 = "0.10"
+# Only to build a Token-2022 mint with a transfer fee.
+spl-token-2022-interface = "2.1.0"
+solana-account = "4.3.2"
+solana-address = "~2.6.1"
+solana-clock = "~3.1.1"
+solana-instruction = "~3.4.0"
+solana-keypair = "3.1.2"
+solana-signer = "3.0.1"
+solana-transaction = "4.1.5"

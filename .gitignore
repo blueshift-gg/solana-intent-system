@@ -1,0 +1,7 @@
+target/
+node_modules/
+.surfpool/
+# Working notes: kept locally, not published
+SPEC.md
+REVIEW.md
+TICKETS.md

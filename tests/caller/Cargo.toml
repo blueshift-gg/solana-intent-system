@@ -1,0 +1,17 @@
+[package]
+name = "mandate-caller"
+version = "0.0.1"
+edition = "2021"
+description = "Test fixture: a program that calls the Mandate program by CPI"
+publish = false
+license = "MIT"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+mandate-core = { workspace = true }
+pinocchio = { workspace = true }

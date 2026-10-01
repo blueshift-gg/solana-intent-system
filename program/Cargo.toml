@@ -1,0 +1,27 @@
+[package]
+name = "mandate-program"
+version = "0.0.1"
+edition = "2021"
+description = "Outcome-bound delegated authority for Solana"
+license = "MIT"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+devnet = ["mandate-core/devnet"]
+testnet = ["mandate-core/testnet"]
+localnet = ["mandate-core/localnet"]
+
+[dependencies]
+# In-program SHA-512: the sol_sha512 syscall is not active on every cluster.
+brine-ed25519 = { version = "0.9.3", features = ["fast-sha512"] }
+mandate-core = { workspace = true }
+pinocchio = { workspace = true }
+pinocchio-system = "0.2.3"
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+sha2 = { version = "0.10", default-features = false }

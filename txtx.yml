@@ -1,0 +1,11 @@
+---
+name: mandate
+id: mandate
+runbooks:
+  - name: surfnet-setup
+    description: Install the Mandate program at its canonical address on a surfnet (no keypair required)
+    location: runbooks/surfnet-setup
+environments:
+  localnet:
+    network_id: localnet
+    rpc_api_url: http://127.0.0.1:8899

@@ -1,0 +1,14 @@
+addon "svm" {
+    rpc_api_url = input.rpc_api_url
+    network_id = input.network_id
+}
+
+action "install_mandate" "svm::setup_surfnet" {
+    description = "Install the Mandate program at its canonical address via direct account write"
+    rpc_api_url = input.rpc_api_url
+
+    deploy_program {
+        program_id = "Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A"
+        binary_path = "target/deploy/mandate_program.so"
+    }
+}

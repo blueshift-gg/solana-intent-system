@@ -1,0 +1,21 @@
+{
+    "name": "@mandate/sdk",
+    "version": "0.0.1",
+    "description": "Mandate for @solana/kit: terms, instructions and accounts",
+    "license": "MIT",
+    "private": true,
+    "type": "module",
+    "sideEffects": false,
+    "main": "./src/index.ts",
+    "types": "./src/index.ts",
+    "scripts": {
+        "build": "wasm-pack build ../mandate-wasm --target web --release --out-dir ../sdk/wasm --out-name mandate --no-pack -- --features localnet",
+        "typecheck": "tsc --noEmit -p ."
+    },
+    "dependencies": {
+        "@solana/kit": "^8.4.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.9.0"
+    }
+}
