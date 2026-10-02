@@ -88,7 +88,7 @@ load!(Session, SESSION_LEN, SESSION_TAG);
 
 /// The epoch an Epoch account holds. The account is absent until the first
 /// `BumpEpoch`, so callers check its address rather than its existence.
-pub fn read_epoch(account: &AccountInfo) -> Result<u32, ProgramError> {
+pub fn read_epoch(account: &AccountInfo) -> Result<u64, ProgramError> {
     match account.is_owned_by(&crate::ID) {
         true => Ok(Epoch::load(account)?.epoch()),
         false => Ok(0),
@@ -96,13 +96,13 @@ pub fn read_epoch(account: &AccountInfo) -> Result<u32, ProgramError> {
 }
 
 /// The authority's current epoch, after deriving its Epoch PDA.
-pub fn current_epoch(account: &AccountInfo, authority: &[u8; 32]) -> Result<u32, ProgramError> {
+pub fn current_epoch(account: &AccountInfo, authority: &[u8; 32]) -> Result<u64, ProgramError> {
     check_pda(account, &[EPOCH_SEED, authority])?;
     read_epoch(account)
 }
 
 /// A mandate's current epoch. Its header holds the Epoch PDA, so nothing is derived.
-pub fn mandate_epoch(mandate: &Mandate, account: &AccountInfo) -> Result<u32, ProgramError> {
+pub fn mandate_epoch(mandate: &Mandate, account: &AccountInfo) -> Result<u64, ProgramError> {
     if account.key().ne(&mandate.epoch_account) {
         return Err(MandateError::InvalidSeeds.into());
     }

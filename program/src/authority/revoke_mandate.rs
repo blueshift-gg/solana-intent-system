@@ -1,19 +1,20 @@
 use crate::events::emit;
-use crate::state::{current_epoch, Load, Mandate};
-use mandate_core::{constants::*, errors::MandateError};
+use crate::state::{current_epoch, load_mandate, Load, Mandate};
+use mandate_core::{constants::*, errors::MandateError, terms::Terms};
 use pinocchio::log::sol_log;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
 
 /// # RevokeMandate
 ///
-/// Revoke one mandate, whether it is on chain yet or only signed.
+/// Revoke one mandate. Its authority may, whether the mandate is on chain yet
+/// or only signed; so may the executor its terms name, once it is on chain.
 ///
 /// > Create its tombstone if it was never created: a header with no terms
 /// > Mark the mandate revoked
 ///
 /// Accounts:
 ///
-/// 1. authority:       [signer]
+/// 1. revoker:         [signer]        the authority, or the terms' executor
 /// 2. payer:           [signer, mut]   funds the tombstone rent if it is new
 /// 3. mandate:         [mut]           PDA [MANDATE_SEED, authority, mandate_id]
 /// 4. epoch:                           PDA [EPOCH_SEED, authority], possibly absent
@@ -25,7 +26,7 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 /// 1. mandate_id: [u8; 32],    // sha256 of the canonical terms
 ///
 /// Account Checks:
-/// - Authority: signer, and the mandate's authority
+/// - Revoker: signer; the mandate's authority or its executor, checked in process
 /// - Mandate: writable; the PDA, or created there
 /// - Epoch: the PDA, checked when a tombstone is created
 /// - Payer, SystemProgram, Engine, Program: no need to check since the CPIs fail otherwise
@@ -33,7 +34,7 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 /// Event Data:
 /// - discriminator: u8, (255u8, 1u8)
 /// - mandate: Pubkey,
-/// - authority: Pubkey,
+/// - revoker: Pubkey,
 pub struct RevokeMandateAccounts<'a> {
     pub authority: &'a AccountInfo,
     pub payer: &'a AccountInfo,
@@ -95,23 +96,25 @@ impl<'a> RevokeMandate<'a> {
 
     pub fn process(&mut self) -> ProgramResult {
         let a = &self.accounts;
-        let authority = a.authority.key();
+        let revoker = a.authority.key();
 
-        // A mandate that was never created gets a tombstone. A signature for
-        // it may exist and its expiry is unknown, so it stays until the epoch moves
-        let epoch = match a.mandate.is_owned_by(&crate::ID) {
-            true => 0,
-            false => current_epoch(a.epoch, authority)?,
-        };
-        let seeds: [&[u8]; 3] = [MANDATE_SEED, authority, self.mandate_id];
-        let mandate = Mandate::load_or_create(a.payer, a.mandate, &seeds, |m| {
-            m.set_not_after(i64::MAX);
-            m.set_epoch(epoch);
-            m.authority = *authority;
-            m.payer = *a.payer.key();
-            m.epoch_account = *a.epoch.key();
-        })?;
-        if mandate.authority.ne(authority) {
+        // A mandate that was never created gets a tombstone, which only its
+        // authority can make: the PDA is derived from the signer. A signature
+        // for it may exist and its expiry is unknown, so it stays until the epoch moves
+        if !a.mandate.is_owned_by(&crate::ID) {
+            let epoch = current_epoch(a.epoch, revoker)?;
+            let seeds: [&[u8]; 3] = [MANDATE_SEED, revoker, self.mandate_id];
+            Mandate::load_or_create(a.payer, a.mandate, &seeds, |m| {
+                m.set_not_after(i64::MAX);
+                m.set_epoch(epoch);
+                m.authority = *revoker;
+                m.payer = *a.payer.key();
+                m.epoch_account = *a.epoch.key();
+            })?;
+        }
+        let (mandate, bytes) = load_mandate(a.mandate)?;
+        let executor = || Terms::decode(bytes).ok().and_then(|t| t.executor);
+        if mandate.authority.ne(revoker) && executor().is_none_or(|e| e.ne(revoker)) {
             return Err(MandateError::InvalidAuthority.into());
         }
         mandate.set_flags(mandate.flags() | REVOKED);
@@ -121,7 +124,7 @@ impl<'a> RevokeMandate<'a> {
             a.engine,
             a.program,
             *Self::DISCRIMINATOR,
-            &[a.mandate.key(), authority],
+            &[a.mandate.key(), revoker],
         )
     }
 }

@@ -97,7 +97,8 @@ export function fathom(): Plugin {
         const period = typeof take.refill === 'object' ? take.refill.over.period : 0;
         if (!plan || t.authority !== member.address || t.takes.length !== 1 || t.requires.length) return 'This approval is not for a Fathom plan';
         if (take.mint !== USDC || BigInt(take.max) !== plan.price || period !== plan.period) return 'This approval does not match the plan';
-        if (take.to.length !== 1 || take.to[0] !== usdc) return 'This approval does not pay Fathom';
+        const { signer } = await ready;
+        if (t.executor !== signer.address || take.to.length !== 1 || take.to[0] !== usdc) return 'This approval does not pay Fathom';
         return null;
     }
 

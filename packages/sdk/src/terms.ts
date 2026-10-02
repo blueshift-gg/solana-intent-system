@@ -16,7 +16,9 @@ export type Terms = {
     /** One execution only, whatever it takes. */
     once: boolean;
     /** The authority's current epoch (`fetchEpoch`). */
-    epoch: number;
+    epoch: string;
+    /** Tells apart mandates whose terms are otherwise identical. */
+    salt: string;
     takes: Take[];
     requires: Require[];
 };
@@ -81,10 +83,12 @@ export async function mandateId(bytes: Uint8Array): Promise<Uint8Array> {
     return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
 }
 
+/** A fresh salt: the same terms can be approved again after a revocation. */
+export const randomSalt = (): string => crypto.getRandomValues(new BigUint64Array(1))[0].toString();
+
 /**
  * A subscription: at most `amount` from the subscriber's account, refilling
- * over `period`, payable only into the merchant's account. Anyone may run the
- * collection; only the merchant can receive it.
+ * over `period`. Only the merchant may collect, and only into its own account.
  */
 export function subscriptionTerms(p: {
     subscriber: Address;
@@ -92,20 +96,23 @@ export function subscriptionTerms(p: {
     mint: Address;
     amount: bigint;
     period: number;
+    /** The key that collects: the only executor, and it may revoke. */
+    merchant: Address;
     merchantAccount: Address;
     start: number;
     end?: number;
     /** The subscriber's current epoch (`fetchEpoch`). */
-    epoch: number;
+    epoch: string;
 }): Terms {
     return {
         authority: p.subscriber,
         epoch: p.epoch,
-        executor: null,
+        executor: p.merchant,
         notAfter: p.end ?? null,
         notBefore: p.start,
         once: false,
         requires: [],
+        salt: randomSalt(),
         takes: [{ from: p.account, max: p.amount.toString(), mint: p.mint, refill: { over: { period: p.period } }, to: [p.merchantAccount] }],
     };
 }

@@ -33,8 +33,8 @@ agent ──GET + X-PAYMENT: Alice's signed budget──▶ API
     Open (pull $0.05, only to the API; the first one also brings Alice's signature) → 200 + data
 ```
 
-- **The budget is a signed mandate** (`subscriptionTerms`: at most $1 per day, all of
-  it to the API's account). Alice signs it on her phone with no transaction; the first
+- **The budget is a signed mandate** (`subscriptionTerms`: at most $1 per day, collected
+  only by the API's key and only into the API's account). Alice signs it on her phone with no transaction; the first
   time only, one SPL `Approve` turns Mandates on.
 - **The API cannot take more than the budget,** cannot be paid to anyone else, and
   stops working the moment Alice bumps her epoch. The program enforces all three, not

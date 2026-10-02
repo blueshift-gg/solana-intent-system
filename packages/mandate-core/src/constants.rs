@@ -24,6 +24,7 @@ pub const MAX_ENTRIES: usize = 16;
 pub const TOKEN_PROGRAM: Pubkey = decode_32_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 pub const TOKEN_2022_PROGRAM: Pubkey =
     decode_32_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+pub const SLOT_HASHES: Pubkey = decode_32_const("SysvarS1otHashes111111111111111111111111111");
 
 /// Engine PDA: [ENGINE_SEED]. The SPL delegate of every enabled token account
 /// and the signer of every event; the test suite re-derives it.
@@ -34,6 +35,7 @@ pub const ENGINE_BUMP: u8 = 254;
 /// seed so nobody can pre-create another authority's mandate.
 pub const MANDATE_SEED: &[u8] = b"mandate";
 /// Revocation epoch of an authority's mandates: [EPOCH_SEED, authority].
+/// Zero until the first `BumpEpoch`, unpredictable after it.
 pub const EPOCH_SEED: &[u8] = b"epoch";
 /// Per-executor session: [SESSION_SEED, executor].
 pub const SESSION_SEED: &[u8] = b"session";
@@ -57,7 +59,7 @@ pub const UNBOUND: u8 = 1;
 
 pub const LEDGER_LEN: usize = 8 + MAX_ASSERTS * 8; // 72
 /// Fixed header; the canonical terms follow it.
-pub const MANDATE_LEN: usize = 2 + LEDGER_LEN + 8 + 4 + 3 * 32 + 2; // 184
-pub const EPOCH_LEN: usize = 1 + 32 + 4; // 37
+pub const MANDATE_LEN: usize = 2 + LEDGER_LEN + 8 + 8 + 3 * 32 + 2; // 188
+pub const EPOCH_LEN: usize = 1 + 32 + 8; // 41
 pub const ENTRY_LEN: usize = 3 * 32 + 1 + 2 * 16; // 129
 pub const SESSION_LEN: usize = 3 + 32 + MAX_ENTRIES * ENTRY_LEN; // 2099

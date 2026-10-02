@@ -79,8 +79,8 @@ pub struct Mandate {
     pub ledger: Ledger,
     /// `i64::MAX` when the terms never expire.
     not_after: [u8; 8],
-    /// The authority's epoch at creation; a later one revokes the mandate.
-    epoch: [u8; 4],
+    /// The authority's epoch at creation; any other revokes the mandate.
+    epoch: [u8; 8],
     pub authority: Pubkey,
     /// Paid the rent; refunded by `CloseMandate`.
     pub payer: Pubkey,
@@ -95,7 +95,7 @@ impl Mandate {
     field!(tag, set_tag, u8);
     field!(flags, set_flags, u8);
     field!(not_after, set_not_after, i64);
-    field!(epoch, set_epoch, u32);
+    field!(epoch, set_epoch, u64);
     field!(terms_len, set_terms_len, u16);
 }
 
@@ -103,14 +103,14 @@ impl Mandate {
 pub struct Epoch {
     tag: [u8; 1],
     pub authority: Pubkey,
-    epoch: [u8; 4],
+    epoch: [u8; 8],
 }
 
 account!(Epoch);
 
 impl Epoch {
     field!(tag, set_tag, u8);
-    field!(epoch, set_epoch, u32);
+    field!(epoch, set_epoch, u64);
 }
 
 /// A token account the session watches: its balance at first sight, and the

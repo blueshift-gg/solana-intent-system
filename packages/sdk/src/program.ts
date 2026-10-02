@@ -65,11 +65,14 @@ export const getCreateMandateInstruction = async (
     };
 };
 
-/** Revoke one mandate, created or only signed. `terms` are its canonical bytes. */
-export const getRevokeMandateInstruction = async (p: { authority: TransactionSigner; payer: TransactionSigner; terms: Uint8Array }): Promise<Instruction> => {
+/**
+ * Revoke one mandate. `revoker` is its authority (the mandate may be on chain
+ * or only signed) or the executor its terms name (once it is on chain).
+ */
+export const getRevokeMandateInstruction = async (p: { revoker: TransactionSigner; payer: TransactionSigner; terms: Uint8Array }): Promise<Instruction> => {
     const { epoch, mandate } = await accountsOf(p.terms);
     return {
-        accounts: [signer(p.authority), payer(p.payer), writable(mandate), readonly(epoch), readonly(SYSTEM), ...tail],
+        accounts: [signer(p.revoker), payer(p.payer), writable(mandate), readonly(epoch), readonly(SYSTEM), ...tail],
         data: Uint8Array.of(1, ...(await mandateId(p.terms))),
         programAddress: MANDATE_PROGRAM_ADDRESS,
     };
@@ -80,6 +83,19 @@ export const getBumpEpochInstruction = async (p: { authority: TransactionSigner;
     accounts: [signer(p.authority), payer(p.payer), writable(await findEpochPda(p.authority.address)), readonly(SYSTEM), ...tail],
     data: Uint8Array.of(2),
     programAddress: MANDATE_PROGRAM_ADDRESS,
+});
+
+const TOKEN_PROGRAM = address('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+
+/**
+ * Enable a token account: SPL `Approve` the engine as its delegate. `amount`
+ * caps what every mandate on the account can pull in total; leave it out for
+ * no cap beyond each mandate's own limits.
+ */
+export const getEnableInstruction = (p: { owner: TransactionSigner; account: Address; amount?: bigint; tokenProgram?: Address }): Instruction => ({
+    accounts: [writable(p.account), readonly(ENGINE_ADDRESS), signer(p.owner)],
+    data: Uint8Array.of(4, ...getU64Encoder().encode(p.amount ?? 2n ** 64n - 1n)),
+    programAddress: p.tokenProgram ?? TOKEN_PROGRAM,
 });
 
 export type Pull = { from: Address; to: Address; amount: bigint };

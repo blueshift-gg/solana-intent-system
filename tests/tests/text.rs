@@ -44,7 +44,8 @@ authority: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU
 EXECUTOR: anyone
 VALID: from 2026-09-21T14:13:20Z until 2026-09-21T14:18:20Z
 REPLAY: once
-EPOCH: 0"
+EPOCH: 0
+SALT: 0"
     );
 }
 
@@ -64,7 +65,8 @@ authority: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU
 EXECUTOR: anyone
 VALID: from 2026-09-21T14:13:20Z until 2027-09-21T14:13:20Z
 REPLAY: any number of times
-EPOCH: 0"
+EPOCH: 0
+SALT: 0"
     );
 }
 
@@ -74,7 +76,7 @@ fn terms_round_trip_through_the_canonical_encoding() {
     let (from, to) = (key(FROM), [key(TO), key(SOL_MINT)]);
     let takes = [
         pay(&from, &usdc, 10 * USDC, MONTHLY, &to),
-        take(&from, &usdc, USDC, Refill::EachUse),
+        pay(&from, &usdc, USDC, Refill::EachUse, &to[..1]),
     ];
     let bytes = encode(&terms(&authority, false, None, &takes, &[]));
     let decoded = Terms::decode(&bytes).unwrap();
@@ -82,9 +84,17 @@ fn terms_round_trip_through_the_canonical_encoding() {
     assert_eq!(decoded.takes.iter().collect::<Vec<_>>(), takes);
 
     // A per-use cap with no limit that persists is refused, unless the mandate runs once
-    let alone = [take(&from, &usdc, USDC, Refill::EachUse)];
+    let alone = [pay(&from, &usdc, USDC, Refill::EachUse, &to)];
     assert!(Terms::decode(&encode(&terms(&authority, false, None, &alone, &[]))).is_err());
     assert!(Terms::decode(&encode(&terms(&authority, true, None, &alone, &[]))).is_ok());
+
+    // Terms that bind nobody are refused: any executor, any destination, nothing required.
+    // Naming the executor is enough
+    let bearer = [take(&from, &usdc, USDC, Refill::Never)];
+    let mut unbound = terms(&authority, false, None, &bearer, &[]);
+    assert!(Terms::decode(&encode(&unbound)).is_err());
+    unbound.executor = Some(&sol);
+    assert!(Terms::decode(&encode(&unbound)).is_ok());
 
     let ratio = Bound::Ratio {
         of: 0,
@@ -119,7 +129,9 @@ fn every_byte_of_the_terms_is_visible_in_the_text() {
         pay(&from, &usdc, 10 * USDC, MONTHLY, &to),
         take(&from, &usdc, USDC, Refill::EachUse),
     ];
-    let payment = terms(&authority, false, None, &payment_takes, &[]);
+    let mut payment = terms(&authority, false, None, &payment_takes, &[]);
+    payment.executor = Some(&sol);
+    payment.salt = 7;
 
     let render = |bytes: &[u8]| {
         let terms = Terms::decode(bytes).ok()?;

@@ -3,6 +3,7 @@ import {
     ENGINE_ADDRESS,
     fetchEpoch,
     getCreateMandateInstruction,
+    getEnableInstruction,
     getRevokeMandateInstruction,
     subscriptionTerms,
     text,
@@ -11,7 +12,7 @@ import type { SolanaSignMandateFeature } from '@mandate/wallet-standard-features
 import type { SolanaSignOffchainMessageFeature } from '@solana/wallet-standard-features';
 import { address, type Address, type TransactionModifyingSigner, type TransactionSigner } from '@solana/kit';
 import { useWalletAccountTransactionSigner } from '@solana/react';
-import { fetchMaybeToken, getApproveInstruction } from '@solana-program/token';
+import { fetchMaybeToken } from '@solana-program/token';
 import { getWalletFeature, type UiWallet, type UiWalletAccount, useConnect, useWallets } from '@wallet-standard/react';
 import { getWalletAccountForUiWalletAccount } from '@wallet-standard/ui-registry';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -21,7 +22,6 @@ import { api, ata, b64, DAY, day, now, rpc, send, short, unb64, USDC, usd } from
 
 const SIGN_MANDATE = 'solana:signMandate';
 const SIGN_OFFCHAIN = 'solana:signOffchainMessage';
-const U64_MAX = 2n ** 64n - 1n;
 
 type Plan = { id: string; name: string; price: string; period: number; perks: string[] };
 type Config = { clock: number; merchant: Address; merchantUsdc: Address; plans: Plan[] };
@@ -253,7 +253,7 @@ function Checkout({ config, plan, onConnect, close, done }: { config: Config; pl
             const token = await fetchMaybeToken(rpc, source);
             if (!token.exists || token.data.amount < BigInt(plan.price)) throw new Error(`Your wallet needs at least ${usd(plan.price)} in USDC`);
             const enabled = token.data.delegate.__option === 'Some' && token.data.delegate.value === ENGINE_ADDRESS;
-            const enable = enabled ? [] : [getApproveInstruction({ amount: U64_MAX, delegate: ENGINE_ADDRESS, owner: signer, source })];
+            const enable = enabled ? [] : [getEnableInstruction({ account: source, owner: signer })];
             // Best first: the wallet renders the terms; else it signs our text; else it signs a transaction.
             // Either way the approval lasts a year: an expiry is what returns the mandate's rent
             const how = ([SIGN_MANDATE, SIGN_OFFCHAIN] as const).find((f) => account.features.includes(f));
@@ -264,6 +264,7 @@ function Checkout({ config, plan, onConnect, close, done }: { config: Config; pl
                 amount: BigInt(plan.price),
                 end: start + 365 * DAY,
                 epoch: await fetchEpoch(rpc, me),
+                merchant: config.merchant,
                 merchantAccount: config.merchantUsdc,
                 mint: USDC,
                 period: plan.period,
@@ -356,7 +357,7 @@ function Account({ config, membership, plan, refresh, choose, signOut }: { confi
         try {
             const terms = unb64(membership.terms);
             // The mandate stays on chain, revoked, until it expires: that is what stops it being created again
-            await send(reader.signer, [await getRevokeMandateInstruction({ authority: reader.signer, payer: reader.signer, terms })]);
+            await send(reader.signer, [await getRevokeMandateInstruction({ payer: reader.signer, revoker: reader.signer, terms })]);
             await refresh();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));

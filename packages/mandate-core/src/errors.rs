@@ -26,7 +26,7 @@ pub enum MandateError {
     InvalidTerms,
     /// The terms are for another cluster
     WrongCluster,
-    /// The signer is not the mandate's authority
+    /// The signer is not the mandate's authority, nor an executor allowed to revoke it
     InvalidAuthority,
     /// The signature does not cover the rendered terms
     InvalidSignature,

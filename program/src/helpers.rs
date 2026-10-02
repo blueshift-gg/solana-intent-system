@@ -174,6 +174,27 @@ pub fn transfer(
     )
 }
 
+/// The most recent slot hash: nobody knows it before its slot.
+#[cfg(target_os = "solana")]
+pub fn latest_slot_hash() -> Result<[u8; 32], ProgramError> {
+    let mut out = [0; 32];
+    // SlotHashes is a u64 count, then (slot: u64, hash: [u8; 32]) newest first.
+    // SAFETY: `sol_get_sysvar` reads a 32-byte id and writes exactly 32 bytes.
+    let failed = unsafe {
+        pinocchio::syscalls::sol_get_sysvar(SLOT_HASHES.as_ptr(), out.as_mut_ptr(), 16, 32)
+    };
+    if failed != 0 {
+        return Err(ProgramError::UnsupportedSysvar);
+    }
+    Ok(out)
+}
+
+/// Host builds (unit tests, clippy) have no syscall to link against.
+#[cfg(not(target_os = "solana"))]
+pub fn latest_slot_hash() -> Result<[u8; 32], ProgramError> {
+    Ok([0; 32])
+}
+
 #[cfg(target_os = "solana")]
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut out = [0; 32];

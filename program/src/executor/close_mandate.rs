@@ -76,7 +76,7 @@ impl<'a> CloseMandate<'a> {
         // Only a mandate whose terms can never run again
         let mandate = Mandate::load(self.mandate)?;
         let expired = Clock::get()?.unix_timestamp >= mandate.not_after();
-        let superseded = mandate_epoch(mandate, self.epoch)? > mandate.epoch();
+        let superseded = mandate_epoch(mandate, self.epoch)? != mandate.epoch();
         if !expired && !superseded {
             return Err(MandateError::NotClosable.into());
         }

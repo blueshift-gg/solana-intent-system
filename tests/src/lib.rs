@@ -269,6 +269,7 @@ pub fn terms<'a>(
         not_after,
         once,
         epoch: 0,
+        salt: 0,
         takes: Seq::List(takes),
         requires: Seq::List(requires),
     }

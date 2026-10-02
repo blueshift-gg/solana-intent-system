@@ -10,12 +10,12 @@ export function spentAt(ledger: { consumed: bigint; rolled: number }, period: nu
     return ledger.consumed > back ? ledger.consumed - back : 0n;
 }
 
-/** The authority's current epoch: new terms must carry it. 0 until the first BumpEpoch. */
-export async function fetchEpoch(rpc: Rpc<SolanaRpcApi>, authority: Address): Promise<number> {
+/** The authority's current epoch: new terms must carry it. "0" until the first BumpEpoch, unpredictable after. */
+export async function fetchEpoch(rpc: Rpc<SolanaRpcApi>, authority: Address): Promise<string> {
     const { value } = await rpc.getAccountInfo(await findEpochPda(authority), { encoding: 'base64' }).send();
-    if (!value) return 0;
+    if (!value) return '0';
     const data = new Uint8Array(getBase64Encoder().encode(value.data[0]));
-    return new DataView(data.buffer, data.byteOffset).getUint32(33, true); // tag, authority, epoch
+    return new DataView(data.buffer, data.byteOffset).getBigUint64(33, true).toString(); // tag, authority, epoch
 }
 
 /**
@@ -28,11 +28,11 @@ export async function fetchMandate(rpc: Rpc<SolanaRpcApi>, terms: Uint8Array) {
     if (!value) return null;
     const data = new Uint8Array(getBase64Encoder().encode(value.data[0]));
     const view = new DataView(data.buffer, data.byteOffset);
-    // tag, flags, rolled, consumed[8], not_after, epoch, authority, payer
+    // tag, flags, rolled, consumed[8], not_after, epoch: u64, authority, payer
     return {
         consumed: view.getBigUint64(10, true),
         done: (data[1] & 1) === 1,
-        payer: getAddressDecoder().decode(data.subarray(118, 150)),
+        payer: getAddressDecoder().decode(data.subarray(122, 154)),
         revoked: (data[1] & 2) === 2,
         rolled: Number(view.getBigInt64(2, true)),
     };

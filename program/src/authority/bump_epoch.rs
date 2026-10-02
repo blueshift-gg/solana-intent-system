@@ -1,4 +1,5 @@
 use crate::events::emit;
+use crate::helpers::{latest_slot_hash, sha256};
 use crate::state::{Epoch, Load};
 use mandate_core::{constants::EPOCH_SEED, errors::MandateError};
 use pinocchio::log::sol_log;
@@ -9,7 +10,7 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 /// Revoke every mandate of the authority at once, created or only signed.
 ///
 /// > Create the epoch account if needed
-/// > Increment the epoch; terms carrying an older one stop working
+/// > Replace the epoch with an unpredictable one; terms carrying any other stop working
 ///
 /// Accounts:
 ///
@@ -29,7 +30,7 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 /// Event Data:
 /// - discriminator: u8, (255u8, 2u8)
 /// - authority: Pubkey,
-/// - epoch: u32,
+/// - epoch: u64,
 pub struct BumpEpoch<'a> {
     pub authority: &'a AccountInfo,
     pub payer: &'a AccountInfo,
@@ -72,14 +73,20 @@ impl<'a> BumpEpoch<'a> {
     pub fn process(&mut self) -> ProgramResult {
         let authority = self.authority.key();
 
-        // Increment, creating the account on first use
+        // Move to an epoch nobody could have known: the old one hashed with
+        // the latest slot hash. A counter would let terms be signed for an epoch
+        // still to come, and each bump would bring them closer to working
         let epoch = Epoch::load_or_create(self.payer, self.epoch, &[EPOCH_SEED, authority], |e| {
             e.authority = *authority
         })?;
         if epoch.authority.ne(authority) {
             return Err(MandateError::InvalidSeeds.into());
         }
-        let next = epoch.epoch().checked_add(1).ok_or(MandateError::Overflow)?;
+        let mut seed = [0; 40];
+        seed[..8].copy_from_slice(&epoch.epoch().to_le_bytes());
+        seed[8..].copy_from_slice(&latest_slot_hash()?);
+        // Zero means "never bumped", so the result is never zero
+        let next = u64::from_le_bytes(sha256(&seed)[..8].try_into().unwrap()) | 1;
         epoch.set_epoch(next);
 
         // Log the BumpEpoch Event

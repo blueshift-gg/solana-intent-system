@@ -25,15 +25,16 @@ cluster: localnet
 engine: Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A
 authority: A9XwnWUxXn1HH1MPzxe5MqfYaKvEHtdQMCoDd72QjPLN
 [0] MAY PAY: at most 8.000000 of mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v from 6NSx1jcpyqzHDFHwC7RXm4LZy53gNsMZWpV3P8vr8k4M to FAUD3SfhKYyynnZsS8pKVgZ9ea5VQohFqpaxKpAwzEGA, refilling over 30d
-EXECUTOR: anyone
-VALID: from 2026-10-01T08:16:00Z until 2027-10-01T08:16:00Z
+EXECUTOR: GNxM82DJMja5ux5extFCEjbQ5C88hvcG7fvsiSCQumgs
+VALID: from 2026-10-01T08:16:00Z until revoked
 REPLAY: any number of times
 EPOCH: 0
+SALT: 8970456561443998011
 ```
 
-This is a subscription: 8 USDC, refilling over 30 days, payable only to one account, for a
-year. The text is an Offchain Message v1. Whoever collects first brings the signature
-and the terms, 169 bytes of binary; the program renders them back to this text, verifies
+This is a subscription: 8 USDC, refilling over 30 days, collected only by one key and
+only into one account, until revoked. The text is an Offchain Message v1. The collector
+brings the signature and the terms, 213 bytes of binary; the program renders them back to this text, verifies
 Ed25519 over it in-program, and stores the terms. Every later collection is a single
 instruction with no signature in it. The text is the only thing a wallet has to show,
 and a byte of the terms cannot change without changing it
@@ -42,7 +43,7 @@ and a byte of the terms cannot change without changing it
 ## Terms
 
 ```text
-Terms   { authority, executor: any | key, not_before, not_after, once, epoch, takes, requires }
+Terms   { authority, executor: any | key, not_before, not_after, once, epoch, salt, takes, requires }
 Take    { from, mint, max, refill: never | over(period) | each use, to: any | accounts }
 Require { target, mint, owner, bound }
 Bound   = const | linear(t0, v0, t1, v1) | ratio(of, num, den)
@@ -63,6 +64,11 @@ lines that all hold. With `once`, the intent runs a single time. A per-use limit
 bounds nothing across executions, so it is only valid next to one that persists, or
 with `once`.
 
+Every intent binds someone: the executor, the destination, or what must come back.
+Terms that leave all three open would pay whoever holds the signature, and are invalid.
+The `salt` tells apart intents whose terms are otherwise identical, so the same plan
+can be approved again after a revocation.
+
 Requirements are summed per account across every intent in the transaction, so one
 deposit cannot satisfy two intents and two intents can settle against each other.
 
@@ -71,7 +77,7 @@ deposit cannot satisfy two intents and two intents can settle against each other
 | # | Instruction | Signer | |
 |---|---|---|---|
 | 0 | `CreateMandate` | authority, or anyone holding its signature | put an intent on chain |
-| 1 | `RevokeMandate` | authority | revoke one intent, on chain or only signed |
+| 1 | `RevokeMandate` | authority, or the intent's executor | revoke one intent; the authority also one that is only signed |
 | 2 | `BumpEpoch` | authority | revoke every intent |
 | 20 | `Open` | executor | check, pull, and for an exchange snapshot |
 | 21 | `Close` | executor | check an exchange's outcomes, end the session |
@@ -79,6 +85,11 @@ deposit cannot satisfy two intents and two intents can settle against each other
 
 Whoever pays an account's rent is always a separate account from whoever signs, and gets
 it back when the account closes.
+
+An intent carries its owner's epoch and stops working when the epoch changes. The epoch
+is zero until the first `BumpEpoch`, and after that a value derived from the latest slot
+hash. It is not a counter, so terms cannot be signed in advance for an epoch still to
+come.
 
 An exchange's `Open` and `Close` must be top-level. The first `Open` reads the
 instructions sysvar and requires exactly one `Close` after it. A payment has no `Close`
@@ -110,7 +121,9 @@ session the first time it settles an exchange.
 - The program is upgradeable and is the delegate of every account that enables it.
 - A token account has one delegate. Any other `Approve` on it disables its intents.
 - Token accounts only. Native SOL has to be wrapped.
-- Enabling a token account is an SPL `Approve`, which is a transaction.
+- Enabling a token account is an SPL `Approve`, which is a transaction. Its amount caps
+  what every intent on the account can pull in total; the SDK's `getEnableInstruction`
+  takes it as an option and approves without a cap when it is left out.
 - Token-2022 transfer hooks are not forwarded. A transfer fee comes out of what the
   destination receives, never out of the payer beyond the limit.
 - No wallet implements `solana:signMandate`. Signing falls back to an offchain message.

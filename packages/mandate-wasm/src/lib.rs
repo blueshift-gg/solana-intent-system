@@ -2,7 +2,7 @@
 //! text come from the same code the program runs, so no JavaScript
 //! reimplements the codec, the validity rules or the canonical text.
 //!
-//! Integers that can exceed 2^53 (amounts, bounds) are strings.
+//! Integers that can exceed 2^53 (amounts, bounds, the epoch, the salt) are strings.
 
 use mandate_core::constants::CLUSTER;
 use mandate_core::render::render;
@@ -19,7 +19,8 @@ struct TermsJson {
     not_before: i64,
     not_after: Option<i64>,
     once: bool,
-    epoch: u32,
+    epoch: String,
+    salt: String,
     takes: Vec<TakeJson>,
     requires: Vec<RequireJson>,
 }
@@ -135,7 +136,8 @@ pub fn encode_terms(json: &str) -> Result<Vec<u8>, JsError> {
         not_before: j.not_before,
         not_after: j.not_after,
         once: j.once,
-        epoch: j.epoch,
+        epoch: j.epoch.parse()?,
+        salt: j.salt.parse()?,
         takes: Seq::List(&takes),
         requires: Seq::List(&requires),
     };
@@ -193,7 +195,8 @@ pub fn decode_terms(bytes: &[u8]) -> Result<String, JsError> {
         not_before: t.not_before,
         not_after: t.not_after,
         once: t.once,
-        epoch: t.epoch,
+        epoch: t.epoch.to_string(),
+        salt: t.salt.to_string(),
         takes,
         requires,
     };

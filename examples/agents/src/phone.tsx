@@ -1,6 +1,5 @@
-import { budget, decode, encode, ENGINE_ADDRESS, fetchEpoch, fetchMandate, getBumpEpochInstruction, message, spentAt, subscriptionTerms } from '@mandate/sdk';
+import { budget, decode, encode, ENGINE_ADDRESS, fetchEpoch, fetchMandate, getBumpEpochInstruction, getEnableInstruction, message, spentAt, subscriptionTerms } from '@mandate/sdk';
 import { createKeyPairSignerFromPrivateKeyBytes, type KeyPairSigner, signBytes } from '@solana/kit';
-import { getApproveInstruction } from '@solana-program/token';
 import { useEffect, useState } from 'react';
 
 import { api, b64, DAY, every, now, rpc, send, type Shared, unb64, usd, USDC, usdcAccount, usdcOf } from './chain.ts';
@@ -62,7 +61,7 @@ export function Phone() {
     const approve = act('Approving', async () => {
         const account = await usdcAccount(me!.address);
         // Once per token: let Mandates use this USDC, $10 across every approval
-        if (!view!.enabled) await send(me!, [getApproveInstruction({ amount: 10_000_000n, delegate: ENGINE_ADDRESS, owner: me!, source: account })]);
+        if (!view!.enabled) await send(me!, [getEnableInstruction({ account, amount: 10_000_000n, owner: me! })]);
         // An expiry is the default for a signed approval; `until revoked` would be an explicit opt-in
         const start = await now();
         const terms = encode(subscriptionTerms({
@@ -70,6 +69,7 @@ export function Phone() {
             amount: BigInt(view!.shared.perDay),
             end: start + 30 * DAY,
             epoch: await fetchEpoch(rpc, me!.address),
+            merchant: view!.shared.provider,
             merchantAccount: view!.shared.providerUsdc,
             mint: USDC,
             period: DAY,

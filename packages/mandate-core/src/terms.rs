@@ -69,7 +69,10 @@ pub struct Terms<'a> {
     pub not_after: Option<i64>,
     /// One execution only, whatever it takes.
     pub once: bool,
-    pub epoch: u32,
+    /// The authority's epoch when the terms were made.
+    pub epoch: u64,
+    /// Tells apart mandates whose terms are otherwise identical.
+    pub salt: u64,
     pub takes: Seq<'a, Take<'a>>,
     pub requires: Seq<'a, Require<'a>>,
 }
@@ -282,7 +285,8 @@ impl<'a> Terms<'a> {
             not_before: r.i64()?,
             not_after: r.option(|r| r.i64())?,
             once: r.bool()?,
-            epoch: r.u32()?,
+            epoch: r.u64()?,
+            salt: r.u64()?,
             takes: Seq::read(&mut r)?,
             requires: Seq::read(&mut r)?,
         };
@@ -320,6 +324,11 @@ impl<'a> Terms<'a> {
             .requires
             .iter()
             .all(|x| x.bound.check(self.takes.len()));
+        // Someone must be bound: the executor, where the tokens go, or what
+        // comes back. Otherwise the signature pays whoever holds it
+        let bearer = self.executor.is_none()
+            && self.requires.is_empty()
+            && self.takes.iter().any(|t| t.to.is_empty());
         // A destination is a payment; a requirement is an exchange. A mandate
         // is one or the other, so a payment never has to join a session
         let mixed = !self.requires.is_empty() && self.takes.iter().any(|t| !t.to.is_empty());
@@ -328,6 +337,7 @@ impl<'a> Terms<'a> {
             || lines > MAX_ASSERTS
             || !takes
             || !capped
+            || bearer
             || !requires
             || mixed
         {
@@ -356,6 +366,7 @@ impl<'a> Terms<'a> {
         }
         w.put(&[self.once as u8]);
         w.put(&self.epoch.to_le_bytes());
+        w.put(&self.salt.to_le_bytes());
         self.takes.write(w);
         self.requires.write(w);
     }

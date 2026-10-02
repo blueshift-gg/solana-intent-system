@@ -74,7 +74,7 @@ pub fn render(
         t.outcome(&require, terms)?;
     }
     if anywhere && terms.requires.is_empty() {
-        t.s("\nREQUIRES: nothing - no guarantee on what you get back");
+        t.s("\nREQUIRES: nothing - the executor decides where it goes");
     }
 
     t.s("\nEXECUTOR: ");
@@ -97,6 +97,8 @@ pub fn render(
     });
     t.s("\nEPOCH: ");
     t.uint(terms.epoch as u128);
+    t.s("\nSALT: ");
+    t.uint(terms.salt as u128);
     Ok(())
 }
 

@@ -12,6 +12,7 @@ type Status = 'waiting' | 'working' | 'capped' | 'revoked';
 /** What the program's refusals mean, for the room. */
 const REASONS: Record<string, { status: Status; say: string }> = {
     BudgetExceeded: { say: 'daily budget used up', status: 'capped' },
+    InvalidExecutor: { say: 'only Inference API may collect on this approval', status: 'working' },
     InvalidPull: { say: 'the approval only pays Inference API', status: 'working' },
     Revoked: { say: 'Alice revoked the budget', status: 'revoked' },
 };

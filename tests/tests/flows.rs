@@ -332,17 +332,19 @@ fn a_payment_cannot_fill_another_mandates_requirement() {
 fn authority_revokes_and_reclaims_everything() {
     let mut f = Fixture::new();
     let user = f.wallet(10 * USDC, 0);
+    let merchant = f.wallet(0, 0);
     let (u, usdc, user_usdc) = (
         user.address().to_bytes(),
         f.usdc.to_bytes(),
         user.usdc.to_bytes(),
     );
+    let to = [merchant.usdc.to_bytes()];
     let key = user.address();
     let epoch = pda(&[EPOCH_SEED, key.as_ref()]);
 
     // A mandate the authority created, then revoked. It was also signed once:
     // the account stays, so that signature cannot create the mandate again
-    let takes = [take(&user_usdc, &usdc, USDC, Refill::Never)];
+    let takes = [pay(&user_usdc, &usdc, USDC, Refill::Never, &to)];
     let created = terms(&u, false, None, &takes, &[]);
     let created_signature = sign(&created, &user.key, f.decimals());
     let created = encode(&created);
@@ -350,10 +352,16 @@ fn authority_revokes_and_reclaims_everything() {
         .unwrap();
 
     // A mandate that was only signed is revoked by its id, used or not
-    let takes = [take(&user_usdc, &usdc, 2 * USDC, Refill::Never)];
+    let takes = [pay(&user_usdc, &usdc, 2 * USDC, Refill::Never, &to)];
     let signed = terms(&u, false, None, &takes, &[]);
     let signed_signature = sign(&signed, &user.key, f.decimals());
     let signed = encode(&signed);
+
+    // Terms signed for an epoch still to come: no bump may ever make them valid
+    let mut early = terms(&u, false, None, &takes, &[]);
+    early.epoch = 1;
+    let early_signature = sign(&early, &user.key, f.decimals());
+    let early = encode(&early);
 
     let mut closes = Vec::new();
     for (bytes, signature) in [(&created, created_signature), (&signed, signed_signature)] {
@@ -375,6 +383,43 @@ fn authority_revokes_and_reclaims_everything() {
         f.send(&[close], &[&user.key]).unwrap();
         assert!(f.svm.get_account(&mandate).is_none_or(|a| a.lamports == 0));
     }
+    let create = create_mandate(&key, &key, &early, Some((&early_signature, &[f.usdc])));
+    assert!(f.send(&[create], &[&user.key]).is_err());
+}
+
+#[test]
+fn the_named_executor_can_revoke_its_own_mandate() {
+    let mut f = Fixture::new();
+    let user = f.wallet(10 * USDC, 0);
+    let (merchant, stranger) = (f.wallet(0, 0), f.payer());
+    let (u, usdc, user_usdc) = (
+        user.address().to_bytes(),
+        f.usdc.to_bytes(),
+        user.usdc.to_bytes(),
+    );
+    let (key, m) = (user.address(), merchant.address());
+
+    // The merchant is the only executor, and sends the tokens where it likes
+    let takes = [take(&user_usdc, &usdc, USDC, MONTHLY)];
+    let spender = m.to_bytes();
+    let mut terms = terms(&u, false, None, &takes, &[]);
+    terms.executor = Some(&spender);
+    let bytes = encode(&terms);
+    f.send(&[create_mandate(&key, &key, &bytes, None)], &[&user.key])
+        .unwrap();
+
+    // A stranger cannot revoke it; the merchant can, and then cannot pull
+    let (mandate, epoch) = (mandate_pda(&key, &bytes), pda(&[EPOCH_SEED, key.as_ref()]));
+    let id = mandate_id(&bytes);
+    let revoke = authority_ix(1, &stranger.pubkey(), &mandate, &[epoch], &id);
+    assert!(f.send(&[revoke], &[&stranger]).is_err());
+    let revoke = authority_ix(1, &m, &mandate, &[epoch], &id);
+    f.send(&[revoke], &[&merchant.key]).unwrap();
+
+    let extra = extra(&[user.usdc, merchant.usdc], &[f.usdc, TOKEN]);
+    let pull = [(user.usdc, merchant.usdc, USDC)];
+    let open = open(&m, &m, &key, &bytes, extra, &pull);
+    assert!(f.send(&[open], &[&merchant.key]).is_err());
 }
 
 #[test]
@@ -586,7 +631,10 @@ fn random_pulls_never_pass_a_limit() {
             .collect();
         // A distinct expiry makes each scenario a distinct mandate
         let expiry = Some(NOW + 10_000_000 + scenario);
-        let bytes = encode(&terms(&u, false, expiry, &takes, &[]));
+        let spender = merchant.address().to_bytes();
+        let mut terms = terms(&u, false, expiry, &takes, &[]);
+        terms.executor = Some(&spender);
+        let bytes = encode(&terms);
         let create = create_mandate(&user.address(), &user.address(), &bytes, None);
         f.send(&[create], &[&user.key]).unwrap();
 
