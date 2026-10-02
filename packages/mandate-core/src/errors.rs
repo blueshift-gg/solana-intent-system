@@ -15,7 +15,7 @@ pub enum MandateError {
     InvalidTag,
     /// The account is not the PDA for its seeds
     InvalidSeeds,
-    /// The mandate exists already
+    /// The policy exists already
     AlreadyInitialized,
 
     /// The terms bytes are not a canonical encoding
@@ -41,13 +41,13 @@ pub enum MandateError {
     Expired,
     /// The signer is not the mandate's spender
     InvalidSpender,
-    /// Only the authority or the spender may close a mandate before it expires,
+    /// Only the authority or the spender may close a policy before it expires,
     /// and nobody may close a page of nonces before its day is over
     NotClosable,
     /// The account is not the one that paid the rent being refunded
     InvalidPayer,
 
-    /// No limit of the mandate covers the account pulled from
+    /// No limit of the policy covers the account pulled from
     InvalidPull,
     /// The pull exceeds a limit
     LimitExceeded,

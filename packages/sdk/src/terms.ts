@@ -54,7 +54,7 @@ export function loadMandate(module?: BufferSource) {
     return loaded;
 }
 
-/** Canonical bytes: what a mandate holds and a signature covers. Throws on invalid terms. */
+/** Canonical bytes: what a policy holds and a signature covers. Throws on invalid terms. */
 export const encode = (terms: Terms): Uint8Array => encodeTerms(JSON.stringify(terms));
 
 export const decode = (bytes: Uint8Array): Terms => JSON.parse(decodeTerms(bytes));
@@ -77,12 +77,12 @@ export function message(bytes: Uint8Array, decimals: Record<string, number>): Ui
     return Uint8Array.from([0xff, ...new TextEncoder().encode('solana offchain'), 1, 1, ...authority, ...body]);
 }
 
-/** `mandate_id`: sha256 of the canonical bytes. */
-export async function mandateId(bytes: Uint8Array): Promise<Uint8Array> {
+/** `terms_id`: sha256 of the canonical bytes. */
+export async function termsId(bytes: Uint8Array): Promise<Uint8Array> {
     return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
 }
 
-/** A fresh salt: a new mandate for the same terms, or a new nonce for a signed intent. */
+/** A fresh salt: a new policy for the same terms, or a new nonce for a signed intent. */
 export const randomSalt = (): string => crypto.getRandomValues(new BigUint64Array(1))[0].toString();
 
 /**

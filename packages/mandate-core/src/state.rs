@@ -39,7 +39,7 @@ macro_rules! account {
     };
 }
 
-/// What each limit of a mandate has consumed.
+/// What each limit of a policy has consumed.
 #[repr(C)]
 pub struct Ledger {
     /// When `consumed` was last written.
@@ -72,9 +72,9 @@ impl Ledger {
     }
 }
 
-/// A mandate: this header, then the canonical terms.
+/// A policy: this header, then the canonical terms.
 #[repr(C)]
-pub struct Mandate {
+pub struct Policy {
     tag: [u8; 1],
     pub ledger: Ledger,
     /// Paid the rent; refunded by `Close`.
@@ -82,9 +82,9 @@ pub struct Mandate {
     terms_len: [u8; 2],
 }
 
-account!(Mandate);
+account!(Policy);
 
-impl Mandate {
+impl Policy {
     field!(tag, set_tag, u8);
     field!(terms_len, set_terms_len, u16);
 }
@@ -118,6 +118,6 @@ impl Nonces {
 
 const _: () = {
     assert!(core::mem::size_of::<Ledger>() == LEDGER_LEN);
-    assert!(core::mem::size_of::<Mandate>() == MANDATE_LEN);
+    assert!(core::mem::size_of::<Policy>() == POLICY_LEN);
     assert!(core::mem::size_of::<Nonces>() == NONCES_LEN);
 };

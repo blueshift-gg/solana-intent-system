@@ -82,7 +82,7 @@ function ask(title: string, rows: [string, string][], details: string, mustAckno
     });
 }
 
-/** The approval a mandate grants, in the wallet's words, and its canonical text. */
+/** The approval a policy grants, in the wallet's words, and its canonical text. */
 async function describe(terms: Uint8Array) {
     const t = decode(terms);
     const decimals: Record<string, number> = {};
@@ -99,7 +99,7 @@ async function describe(terms: Uint8Array) {
     return { decimals, never: !t.notAfter, rows, text: text(terms, decimals) };
 }
 
-/** What a transaction does, by instruction. A mandate created by transaction is shown like a signed one. */
+/** What a transaction does, by instruction. A policy created by transaction is shown like a signed one. */
 async function summarize(transaction: Uint8Array) {
     const compiled = getCompiledTransactionMessageDecoder().decode(getTransactionDecoder().decode(transaction).messageBytes);
     const rows: [string, string][] = [];

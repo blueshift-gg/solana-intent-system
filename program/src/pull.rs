@@ -1,6 +1,6 @@
 use crate::events::emit;
 use crate::helpers::{balance, transfer};
-use crate::state::mandate;
+use crate::state::policy;
 use mandate_core::errors::MandateError;
 use mandate_core::terms::Terms;
 use pinocchio::log::sol_log;
@@ -62,8 +62,8 @@ impl Legs<'_> {
 
 /// # Pull
 ///
-/// Take tokens under a mandate, within every limit on the account. If the
-/// mandate has a price, the spender pays it to the authority here, in the same
+/// Take tokens under a policy, within every limit on the account. If the
+/// policy has a price, the spender pays it to the authority here, in the same
 /// instruction: there is nothing in between to trust. Callable by CPI.
 ///
 /// > Check the window and the spender
@@ -74,7 +74,7 @@ impl Legs<'_> {
 /// Accounts:
 ///
 /// 1. spender:         [signer]
-/// 2. mandate:         [mut]
+/// 2. policy:         [mut]
 /// 3. from:            [mut]           the authority's token account
 /// 4. mint:                            its mint
 /// 5. to:              [mut]           where the spender sends the tokens
@@ -94,18 +94,18 @@ impl Legs<'_> {
 ///
 /// Account Checks:
 /// - Spender: signer; the one the terms name, checked in process
-/// - Mandate: writable, loaded in process
+/// - Policy: writable, loaded in process
 /// - From, Mint, PayTo, PayMint: the accounts the terms name, checked in process
 /// - To, PayFrom, Engine, Program, token programs: no need to check since the CPIs fail otherwise
 ///
 /// Event Data:
 /// - discriminator: u8, (255u8, 1u8)
-/// - mandate: Pubkey,
+/// - policy: Pubkey,
 /// - spender: Pubkey,
 /// - amount: u64,
 /// - paid: u64,
 pub struct Pull<'a> {
-    pub mandate: &'a AccountInfo,
+    pub policy: &'a AccountInfo,
     pub program: &'a AccountInfo,
     pub legs: Legs<'a>,
     pub amount: u64,
@@ -117,7 +117,7 @@ impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Pull<'a> {
     fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
         sol_log("Pull");
 
-        let [spender, mandate, from, mint, to, engine, program, _token_program, payment @ ..] =
+        let [spender, policy, from, mint, to, engine, program, _token_program, payment @ ..] =
             accounts
         else {
             return Err(ProgramError::NotEnoughAccountKeys);
@@ -127,12 +127,12 @@ impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Pull<'a> {
         if !spender.is_signer() {
             return Err(MandateError::NotSigner.into());
         }
-        if !mandate.is_writable() {
+        if !policy.is_writable() {
             return Err(MandateError::NotMutable.into());
         }
 
         Ok(Self {
-            mandate,
+            policy,
             program,
             legs: Legs {
                 spender,
@@ -157,7 +157,7 @@ impl<'a> Pull<'a> {
         let now = Clock::get()?.unix_timestamp;
         let (legs, amount) = (&self.legs, self.amount);
 
-        let (mandate, bytes) = mandate(self.mandate)?;
+        let (policy, bytes) = policy(self.policy)?;
         let terms = Terms::decode(bytes)?;
         legs.check(&terms, now)?;
 
@@ -165,7 +165,7 @@ impl<'a> Pull<'a> {
         // written back as of now, so one timestamp serves all of them
         let mut covered = false;
         for (k, limit) in terms.limits().iter().enumerate() {
-            let mut spent = mandate.ledger.spent(k, limit.per, terms.not_before, now);
+            let mut spent = policy.ledger.spent(k, limit.per, terms.not_before, now);
             if limit.from.eq(legs.from.key()) {
                 if limit.mint.ne(legs.mint.key()) {
                     return Err(MandateError::InvalidTarget.into());
@@ -176,12 +176,12 @@ impl<'a> Pull<'a> {
                 }
                 covered = true;
             }
-            mandate.ledger.set_consumed(k, spent);
+            policy.ledger.set_consumed(k, spent);
         }
         if !covered {
             return Err(MandateError::InvalidPull.into());
         }
-        mandate.ledger.set_rolled(now);
+        policy.ledger.set_rolled(now);
 
         let paid = legs.settle(&terms, amount, now)?;
 
@@ -191,7 +191,7 @@ impl<'a> Pull<'a> {
             self.program,
             *Self::DISCRIMINATOR,
             &[
-                self.mandate.key(),
+                self.policy.key(),
                 legs.spender.key(),
                 &amount.to_le_bytes(),
                 &paid.to_le_bytes(),

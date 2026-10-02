@@ -1,6 +1,6 @@
 use crate::events::emit;
 use crate::helpers::close;
-use crate::state::{mandate, nonces};
+use crate::state::{nonces, policy};
 use mandate_core::terms::Terms;
 use mandate_core::{constants::*, errors::MandateError};
 use pinocchio::log::sol_log;
@@ -9,9 +9,9 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 
 /// # Close
 ///
-/// Close a mandate or a page of nonces, and return its rent to whoever paid it.
+/// Close a policy or a page of nonces, and return its rent to whoever paid it.
 ///
-/// A mandate: its authority or its spender may at any time, and anyone once
+/// A policy: its authority or its spender may at any time, and anyone once
 /// it has expired. Only a transaction can create one, so it is gone for good.
 ///
 /// A page of nonces: anyone, once its day is over. Every intent it guarded
@@ -22,7 +22,7 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 /// Accounts:
 ///
 /// 1. closer:          [signer]
-/// 2. account:         [mut]           a Mandate or a page of Nonces
+/// 2. account:         [mut]           a Policy or a page of Nonces
 /// 3. payer:           [mut]           the recorded payer, receives the rent
 /// 4. engine:                          event signer
 /// 5. program:         [executable]    this program, for the event CPI
@@ -84,12 +84,12 @@ impl<'a> Close<'a> {
         let (payer, allowed) = match nonces(self.account) {
             Ok(page) => (page.payer, now >= (page.day() + 1) * NONCE_DAY),
             Err(_) => {
-                let (mandate, bytes) = mandate(self.account)?;
+                let (policy, bytes) = policy(self.account)?;
                 let terms = Terms::decode(bytes)?;
                 let party =
                     terms.authority.eq(closer) || terms.spender.is_some_and(|s| s.eq(closer));
                 (
-                    mandate.payer,
+                    policy.payer,
                     party || terms.not_after.is_some_and(|t| now >= t),
                 )
             }

@@ -14,7 +14,7 @@ const ZERO: Pubkey = [0; 32];
 /// What a limit counts over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Per {
-    /// The life of the mandate.
+    /// The life of the policy.
     Total,
     /// Fixed windows of `seconds`, counted from `not_before`. Nothing carries over.
     Every(u32),
@@ -59,7 +59,7 @@ pub struct Terms<'a> {
     pub spender: Option<&'a Pubkey>,
     pub not_before: i64,
     pub not_after: Option<i64>,
-    /// Tells apart mandates whose terms are otherwise identical.
+    /// Tells apart policies whose terms are otherwise identical.
     pub salt: u64,
     limits: [Limit<'a>; MAX_LIMITS],
     count: u8,
@@ -203,7 +203,7 @@ impl<'a> Terms<'a> {
             one_source && p.num > 0 && p.den > 0 && decay
         });
         // Someone must be bound: a spender, or a price the owner is paid.
-        // Otherwise the mandate pays whoever finds it
+        // Otherwise the policy pays whoever finds it
         let bound = self.spender.is_some() || self.price.is_some();
         if !(window && sized && positive && capped && price && bound) {
             return Err(MandateError::InvalidTerms);

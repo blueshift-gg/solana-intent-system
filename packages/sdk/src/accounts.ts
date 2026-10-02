@@ -1,7 +1,7 @@
 import { getAddressDecoder, getBase64Encoder, type Rpc, type SolanaRpcApi } from '@solana/kit';
 
-import { findMandatePda, findNoncesPda } from './program.ts';
-import { decode, mandateId } from './terms.ts';
+import { findPolicyPda, findNoncesPda } from './program.ts';
+import { decode, termsId } from './terms.ts';
 
 const NONCE_BITS = 1024n;
 
@@ -15,9 +15,9 @@ const read = async (rpc: Rpc<SolanaRpcApi>, account: Parameters<Rpc<SolanaRpcApi
  * `spent` is what each limit has consumed at `now` (pass the Clock sysvar's
  * time): a periodic limit starts every window at zero, as in the program.
  */
-export async function fetchMandate(rpc: Rpc<SolanaRpcApi>, terms: Uint8Array, now: number) {
+export async function fetchPolicy(rpc: Rpc<SolanaRpcApi>, terms: Uint8Array, now: number) {
     const t = decode(terms);
-    const data = await read(rpc, await findMandatePda(t.authority, await mandateId(terms)));
+    const data = await read(rpc, await findPolicyPda(t.authority, await termsId(terms)));
     if (!data) return null;
     const view = new DataView(data.buffer, data.byteOffset);
     // tag, rolled: i64, consumed: [u64; 8], payer

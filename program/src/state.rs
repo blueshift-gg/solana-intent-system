@@ -3,7 +3,7 @@
 //! checked borrow, so callers must not alias a view.
 
 use crate::helpers::{check_pda, create_pda};
-pub use mandate_core::state::{Mandate, Nonces};
+pub use mandate_core::state::{Nonces, Policy};
 use mandate_core::{constants::*, errors::MandateError};
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError};
 
@@ -26,10 +26,10 @@ fn bytes(account: &AccountInfo, len: usize, tag: u8) -> Result<&mut [u8], Progra
 
 /// A mandate's header and the canonical terms after it.
 #[allow(clippy::mut_from_ref)]
-pub fn mandate(account: &AccountInfo) -> Result<(&mut Mandate, &[u8]), ProgramError> {
-    let (header, rest) = bytes(account, MANDATE_LEN, MANDATE_TAG)?.split_at_mut(MANDATE_LEN);
+pub fn policy(account: &AccountInfo) -> Result<(&mut Policy, &[u8]), ProgramError> {
+    let (header, rest) = bytes(account, POLICY_LEN, POLICY_TAG)?.split_at_mut(POLICY_LEN);
     // SAFETY: `header` holds exactly the layout; all fields have alignment 1.
-    let header = unsafe { Mandate::from_bytes_unchecked_mut(header) };
+    let header = unsafe { Policy::from_bytes_unchecked_mut(header) };
     let terms = rest
         .get(..header.terms_len() as usize)
         .ok_or(MandateError::InvalidAccountLength)?;

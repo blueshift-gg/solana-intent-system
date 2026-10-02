@@ -1,10 +1,10 @@
 import {
     encode,
     ENGINE_ADDRESS,
-    fetchMandate,
+    fetchPolicy,
     getCloseInstruction,
     getCreateInstruction,
-    mandateAddress,
+    policyAddress,
     getEnableInstruction,
     subscriptionTerms,
     text,
@@ -322,8 +322,8 @@ function Account({ config, membership, plan, refresh, choose, signOut }: { confi
         try {
             const terms = unb64(membership.terms);
             // Closing ends it at once, and the rent goes back to whoever paid it
-            const mandate = await fetchMandate(rpc, terms, await now());
-            await send(reader.signer, [getCloseInstruction({ account: await mandateAddress(terms), closer: reader.signer, payer: mandate?.payer ?? reader.me })]);
+            const policy = await fetchPolicy(rpc, terms, await now());
+            await send(reader.signer, [getCloseInstruction({ account: await policyAddress(terms), closer: reader.signer, payer: policy?.payer ?? reader.me })]);
             await refresh();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));

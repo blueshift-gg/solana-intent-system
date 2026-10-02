@@ -163,7 +163,7 @@ fn terms_round_trip_and_invalid_terms_are_refused() {
 
 /// What a wallet shows must pin the terms exactly: changing any byte of the
 /// encoding either fails to decode or changes the text. One signature can
-/// then never authorize two different mandates.
+/// then never authorize two different policies.
 #[test]
 fn every_byte_of_the_terms_is_visible_in_the_text() {
     let (authority, spender, usdc, sol) =

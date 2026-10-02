@@ -213,7 +213,7 @@ fn a_signed_intent_runs_once_and_costs_its_signer_nothing() {
 }
 
 #[test]
-fn closing_a_mandate_returns_the_rent_at_once() {
+fn closing_a_policy_returns_the_rent_at_once() {
     let mut f = Fixture::new();
     let user = f.wallet(10 * USDC, 0);
     let (merchant, sponsor, stranger) = (f.wallet(0, 0), f.payer(), f.payer());
@@ -226,36 +226,36 @@ fn closing_a_mandate_returns_the_rent_at_once() {
     let (owner, payer) = (user.address(), sponsor.pubkey());
 
     // The user signs the transaction; a sponsor pays the fee and the rent.
-    // One mandate never expires, the other does: both close the same way
+    // One policy never expires, the other does: both close the same way
     let limits = [limit(&user_usdc, &usdc, USDC, MONTHLY)];
-    let mut mandates = Vec::new();
+    let mut policies = Vec::new();
     for not_after in [None, Some(NOW + 365 * DAY)] {
         let bytes = encode(&terms(&u, Some(&m), not_after, &limits, None));
         let create = create(&owner, &payer, &bytes);
         f.send(&[create], &[&sponsor, &user.key]).unwrap();
-        mandates.push(mandate_pda(&owner, &bytes));
+        policies.push(policy_pda(&owner, &bytes));
     }
     let funded = f.svm.get_balance(&payer).unwrap();
 
     // A stranger cannot close it, and the rent cannot go to anyone but its payer.
     // The owner can close, and so can the spender
-    let ix = close(&stranger.pubkey(), &mandates[0], &payer);
+    let ix = close(&stranger.pubkey(), &policies[0], &payer);
     assert!(refused(
         f.send(&[ix], &[&stranger]),
         MandateError::NotClosable
     ));
-    let ix = close(&owner, &mandates[0], &owner);
+    let ix = close(&owner, &policies[0], &owner);
     assert!(refused(
         f.send(&[ix], &[&user.key]),
         MandateError::InvalidPayer
     ));
-    let ix = close(&owner, &mandates[0], &payer);
+    let ix = close(&owner, &policies[0], &payer);
     f.send(&[ix], &[&user.key]).unwrap();
-    let ix = close(&merchant.address(), &mandates[1], &payer);
+    let ix = close(&merchant.address(), &policies[1], &payer);
     f.send(&[ix], &[&merchant.key]).unwrap();
 
-    for mandate in &mandates {
-        assert!(f.svm.get_account(mandate).is_none_or(|a| a.lamports == 0));
+    for policy in &policies {
+        assert!(f.svm.get_account(policy).is_none_or(|a| a.lamports == 0));
     }
     assert!(f.svm.get_balance(&payer).unwrap() > funded);
 }
@@ -365,7 +365,7 @@ fn anyone_fills_a_signed_order_at_a_decaying_price() {
 }
 
 #[test]
-fn a_priced_mandate_fills_in_parts_for_anyone() {
+fn a_priced_policy_fills_in_parts_for_anyone() {
     let mut f = Fixture::new();
     let user = f.wallet(100 * USDC, 0);
     let (first, second) = (f.wallet(0, 10 * SOL), f.wallet(0, 10 * SOL));
@@ -414,14 +414,14 @@ fn a_priced_mandate_fills_in_parts_for_anyone() {
 }
 
 #[test]
-fn a_mandate_reaches_only_its_authoritys_accounts() {
+fn a_policy_reaches_only_its_authoritys_accounts() {
     let mut f = Fixture::new();
     let victim = f.wallet(100 * USDC, 0);
     let thief = f.wallet(0, 0);
     let (t, usdc) = (thief.address().to_bytes(), f.usdc.to_bytes());
     let victim_usdc = victim.usdc.to_bytes();
 
-    // The engine is the victim's delegate too, but this mandate is the thief's
+    // The engine is the victim's delegate too, but this policy is the thief's
     let limits = [limit(&victim_usdc, &usdc, 100 * USDC, Per::Total)];
     let bytes = encode(&terms(&t, Some(&t), None, &limits, None));
     let key = thief.address();
@@ -536,7 +536,7 @@ fn a_fee_token_never_shorts_the_authority() {
 }
 
 /// A reference model of the limits, run against the program on random
-/// mandates, pulls and waits: the program accepts exactly what the model
+/// policies, pulls and waits: the program accepts exactly what the model
 /// accepts, so no sequence of pulls gets past any limit.
 #[test]
 fn random_pulls_never_pass_a_limit() {

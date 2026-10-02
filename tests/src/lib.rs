@@ -100,7 +100,7 @@ impl Fixture {
         wallet
     }
 
-    /// A funded wallet that has not enabled mandates yet.
+    /// A funded wallet that has not enabled policies yet.
     pub fn fresh_wallet(&mut self, usdc: u64, sol: u64) -> Wallet {
         let key = Keypair::new();
         let Self {
@@ -130,14 +130,14 @@ impl Fixture {
     }
 
     /// The one-time setup for a token: approve the engine as delegate. `cap`
-    /// is the budget every mandate on this account shares; `u64::MAX` for none.
+    /// is the budget every policy on this account shares; `u64::MAX` for none.
     pub fn enable(&mut self, wallet: &Wallet, account: &Address, cap: u64) {
         Approve::new(&mut self.svm, &wallet.key, &ENGINE_KEY, account, cap)
             .send()
             .unwrap();
     }
 
-    /// What the engine may still pull from `account`, across every mandate.
+    /// What the engine may still pull from `account`, across every policy.
     pub fn allowance(&self, account: &Address) -> u64 {
         get_spl_account::<spl_token::state::Account>(&self.svm, account)
             .unwrap()
@@ -188,7 +188,7 @@ pub fn encode(terms: &Terms) -> Vec<u8> {
     bytes
 }
 
-pub fn mandate_id(bytes: &[u8]) -> [u8; 32] {
+pub fn terms_id(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
@@ -233,18 +233,18 @@ pub fn terms<'a>(
     Terms::new(authority, spender, (NOW, not_after), 0, limits, price)
 }
 
-pub fn mandate_pda(authority: &Address, bytes: &[u8]) -> Address {
-    pda(&[MANDATE_SEED, authority.as_ref(), &mandate_id(bytes)])
+pub fn policy_pda(authority: &Address, bytes: &[u8]) -> Address {
+    pda(&[POLICY_SEED, authority.as_ref(), &terms_id(bytes)])
 }
 
-/// Put a mandate on chain: the authority signs, `payer` funds the rent.
+/// Put a policy on chain: the authority signs, `payer` funds the rent.
 pub fn create(authority: &Address, payer: &Address, bytes: &[u8]) -> Instruction {
     Instruction {
         program_id: PROGRAM,
         accounts: vec![
             AccountMeta::new_readonly(*authority, true),
             AccountMeta::new(*payer, true),
-            AccountMeta::new(mandate_pda(authority, bytes), false),
+            AccountMeta::new(policy_pda(authority, bytes), false),
             AccountMeta::new_readonly(SYSTEM, false),
             AccountMeta::new_readonly(ENGINE_KEY, false),
             AccountMeta::new_readonly(PROGRAM, false),
@@ -277,7 +277,7 @@ fn legs((from, mint, to): Take, payment: Option<Pay>, token_program: Address) ->
     accounts
 }
 
-/// `spender` takes `amount` under a mandate, paying its price if it has one.
+/// `spender` takes `amount` under a policy, paying its price if it has one.
 pub fn pull(
     spender: &Address,
     authority: &Address,
@@ -289,7 +289,7 @@ pub fn pull(
 ) -> Instruction {
     let mut accounts = vec![
         AccountMeta::new_readonly(*spender, true),
-        AccountMeta::new(mandate_pda(authority, bytes), false),
+        AccountMeta::new(policy_pda(authority, bytes), false),
     ];
     accounts.extend(legs(take, payment, token_program));
     Instruction {
@@ -345,7 +345,7 @@ pub fn cancel(authority: &Address, not_after: i64, salt: u64) -> Instruction {
     }
 }
 
-/// Close a mandate or a page of nonces; its rent goes to `payer`, the account that paid it.
+/// Close a policy or a page of nonces; its rent goes to `payer`, the account that paid it.
 pub fn close(closer: &Address, account: &Address, payer: &Address) -> Instruction {
     Instruction {
         program_id: PROGRAM,

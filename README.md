@@ -5,13 +5,13 @@ limits, without giving up custody.
 
 There are two things an owner can give, with the same terms:
 
-- A **mandate** is a standing permission on chain. The owner creates it with a
+- A **policy** is a standing permission on chain. The owner creates it with a
   transaction, and its spender uses it again and again.
 - An **intent** is one action the owner signs as text. Whoever it permits runs it once.
   Nothing goes on chain first, and the owner sends no transaction.
 
 ```text
-Mandate   Create  →  Pull, Pull, Pull …  →  Close
+Policy    Create  →  Pull, Pull, Pull …  →  Close
 Intent    sign    →  Fill
 ```
 
@@ -22,10 +22,10 @@ there is nothing between the two transfers to trust. Any program can call them.
 
 | Use | As | Spender | Limits | Price |
 |---|---|---|---|---|
-| Subscription | mandate | the merchant | 8 USDC every 30 days | none |
-| Agent budget | mandate | the agent's key | 5 per use, 12 a day, 100 in total | none |
-| DCA | mandate | anyone | 10 USDC every day | at least 0.005 SOL per USDC |
-| Limit order, filled in parts | mandate | anyone | 100 USDC in total | at least 0.005 SOL per USDC |
+| Subscription | policy | the merchant | 8 USDC every 30 days | none |
+| Agent budget | policy | the agent's key | 5 per use, 12 a day, 100 in total | none |
+| DCA | policy | anyone | 10 USDC every day | at least 0.005 SOL per USDC |
+| Limit order, filled in parts | policy | anyone | 100 USDC in total | at least 0.005 SOL per USDC |
 | Swap, Dutch auction | intent | anyone | 100 USDC | a price that falls over five minutes |
 | One payment signed in advance | intent | the payee | 100 USDC, before a date | none |
 
@@ -38,7 +38,7 @@ Price { to, mint, num, den, decay?: (t0, t1, num) }
 ```
 
 A limit is "at most `max` of `mint` may leave `from`", counted over the life of a
-mandate, over fixed windows that start at `not_before`, or over a single pull. Limits on
+policy, over fixed windows that start at `not_before`, or over a single pull. Limits on
 one account stack: a pull must fit every one of them. What is unused in a window does
 not carry over.
 
@@ -78,8 +78,8 @@ sign now, and the spender lands it any time before the date, with nothing set up
 
 | # | Instruction | Signer | |
 |---|---|---|---|
-| 0 | `Create` | the owner | put a mandate on chain |
-| 1 | `Pull` | the spender | take tokens under a mandate, and pay its price if it has one |
+| 0 | `Create` | the owner | put a policy on chain |
+| 1 | `Pull` | the spender | take tokens under a policy, and pay its price if it has one |
 | 2 | `Close` | see below | close an account and return its rent |
 | 10 | `Fill` | the spender | run a signed intent, once |
 | 11 | `Cancel` | the owner | use up an intent's nonce, so it can never run |
@@ -89,10 +89,10 @@ account from whoever signs.
 
 | Account | Holds | Closes |
 |---|---|---|
-| Mandate | the terms, and what each limit has consumed | the owner or the spender, at any time; anyone after its expiry |
+| Policy | the terms, and what each limit has consumed | the owner or the spender, at any time; anyone after its expiry |
 | Nonces | 1,024 used-nonce bits, for one owner's intents that expire on one day | anyone, once that day is over |
 
-A mandate is created only by a transaction, so closing it is final and the rent returns
+A policy is created only by a transaction, so closing it is final and the rent returns
 at once. A page of nonces closes when every intent it guards has expired.
 
 ## Cost
@@ -115,16 +115,16 @@ One run each on a Surfpool mainnet fork, whole transaction:
 
 - Not audited, and its invariants are not model-checked.
 - The program is upgradeable and is the delegate of every account that enables it.
-- A token account has one delegate. Any other `Approve` on it disables its mandates and intents.
+- A token account has one delegate. Any other `Approve` on it disables its policies and intents.
 - Token accounts only. Native SOL has to be wrapped.
 - Enabling a token account is an SPL `Approve`, which is a transaction. Its amount caps
-  what every mandate and intent on the account can pull in total; the SDK's
+  what every policy and intent on the account can pull in total; the SDK's
   `getEnableInstruction` takes it as an option and approves without a cap when it is
   left out.
 - A spender that pays a price must already hold what it pays.
 - A price pays one token into one account of the owner.
 - An intent runs once, for any amount up to its limits. To be filled in parts, an order
-  has to be a mandate.
+  has to be a policy.
 - An intent's nonce is its salt modulo 1,024. Two live intents of one owner that expire
   on the same day and share that value cannot both run; the second fails, and has to be
   signed again with another salt.

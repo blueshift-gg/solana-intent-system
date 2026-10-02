@@ -1,4 +1,4 @@
-import { encode, ENGINE_ADDRESS, fetchMandate, getCloseInstruction, getCreateInstruction, getEnableInstruction, mandateAddress, subscriptionTerms } from '@mandate/sdk';
+import { encode, ENGINE_ADDRESS, fetchPolicy, getCloseInstruction, getCreateInstruction, getEnableInstruction, policyAddress, subscriptionTerms } from '@mandate/sdk';
 import { createKeyPairSignerFromPrivateKeyBytes, type KeyPairSigner } from '@solana/kit';
 import { useEffect, useState } from 'react';
 
@@ -36,10 +36,10 @@ export function Phone() {
             let spent = 0n;
             let revoked = false;
             if (mine) {
-                const mandate = await fetchMandate(rpc, unb64(shared.budget!.terms), shared.clock);
-                spent = mandate?.spent[0] ?? 0n;
-                // The budget is the mandate: closing it is revoking it
-                revoked = !mandate;
+                const policy = await fetchPolicy(rpc, unb64(shared.budget!.terms), shared.clock);
+                spent = policy?.spent[0] ?? 0n;
+                // The budget is the policy: closing it is revoking it
+                revoked = !policy;
             }
             const enabled = !!token && token.delegate.__option === 'Some' && token.delegate.value === ENGINE_ADDRESS;
             setView({ enabled, mine, revoked, shared, spent, usdc: token?.amount ?? 0n });
@@ -78,8 +78,8 @@ export function Phone() {
 
     const revoke = act('Revoking', async () => {
         const terms = unb64(view!.shared.budget!.terms);
-        const mandate = await fetchMandate(rpc, terms, await now());
-        if (mandate) await send(me!, [getCloseInstruction({ account: await mandateAddress(terms), closer: me!, payer: mandate.payer })]);
+        const policy = await fetchPolicy(rpc, terms, await now());
+        if (policy) await send(me!, [getCloseInstruction({ account: await policyAddress(terms), closer: me!, payer: policy.payer })]);
     });
 
     if (!me || !view) return <main className="phone-page"><p className="quiet">Opening Alice’s wallet…</p></main>;

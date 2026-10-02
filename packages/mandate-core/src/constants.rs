@@ -15,7 +15,7 @@ pub const CLUSTER: u8 = if cfg!(feature = "localnet") {
     0
 };
 
-/// Limits in one mandate.
+/// Limits in one policy.
 pub const MAX_LIMITS: usize = 8;
 /// 9999-12-31T23:59:59Z: the last instant the canonical text can render.
 pub const MAX_TIME: i64 = 253_402_300_799;
@@ -29,9 +29,9 @@ pub const TOKEN_2022_PROGRAM: Pubkey =
 pub const ENGINE_SEED: &[u8] = b"engine";
 pub const ENGINE: Pubkey = decode_32_const("6NpP2w9pBwSWBkQ7yNPYo5ruPY47goYB8DNsjBuKGyHp");
 pub const ENGINE_BUMP: u8 = 254;
-/// Mandate PDA: [MANDATE_SEED, authority, sha256(terms)]. The authority is a
-/// seed so nobody can pre-create another authority's mandate.
-pub const MANDATE_SEED: &[u8] = b"mandate";
+/// Policy PDA: [POLICY_SEED, authority, sha256(terms)]. The authority is a
+/// seed so nobody can pre-create another authority's policy.
+pub const POLICY_SEED: &[u8] = b"policy";
 
 /// Used nonces of signed intents: [NONCES_SEED, authority, day], where `day`
 /// is the intent's expiry in whole days, little-endian. Every intent in a
@@ -42,7 +42,7 @@ pub const NONCE_DAY: i64 = 86_400;
 pub const NONCE_BITS: usize = 1024;
 
 /// Account tags: the first byte of every account, one per type.
-pub const MANDATE_TAG: u8 = 1;
+pub const POLICY_TAG: u8 = 1;
 pub const NONCES_TAG: u8 = 2;
 
 /// Self-CPI event instruction discriminator.
@@ -50,5 +50,5 @@ pub const EVENT_DISCRIMINATOR: u8 = 255;
 
 pub const LEDGER_LEN: usize = 8 + MAX_LIMITS * 8; // 72
 /// Fixed header; the canonical terms follow it.
-pub const MANDATE_LEN: usize = 1 + LEDGER_LEN + 32 + 2; // 107
+pub const POLICY_LEN: usize = 1 + LEDGER_LEN + 32 + 2; // 107
 pub const NONCES_LEN: usize = 1 + 32 + 8 + NONCE_BITS / 8; // 169

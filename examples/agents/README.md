@@ -33,7 +33,7 @@ agent ──GET + X-PAYMENT: the terms of Alice's budget──▶ API
     Pull $0.05 → 200 + data
 ```
 
-- **The budget is a mandate** (`subscriptionTerms`: at most $1 per day, spendable only
+- **The budget is a policy** (`subscriptionTerms`: at most $1 per day, spendable only
   by the API's key). Alice approves it on her phone with one transaction, which also
   turns Mandates on for her USDC the first time.
 - **The API cannot take more than the budget,** nobody else can spend it, and it

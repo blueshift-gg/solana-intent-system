@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { decode, fetchMandate, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
+import { decode, fetchPolicy, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
 import {
     address,
     type Address,
@@ -43,7 +43,7 @@ type Payment = { amount: string; at: number; signature: string };
 type Member = {
     address: Address;
     plan: string;
-    /** Canonical terms of the mandate the member created on chain. */
+    /** Canonical terms of the policy the member created on chain. */
     terms: Uint8Array;
     since: number;
     paidThrough: number;
@@ -132,8 +132,8 @@ export function fathom(): Plugin {
 
     /** Whether the member withdrew the approval on chain: the chain, not our database, is the record. */
     async function withdrawn(member: Member) {
-        // Cancelling closes the mandate
-        return (await fetchMandate(rpc, member.terms, await clock())) === null;
+        // Cancelling closes the policy
+        return (await fetchPolicy(rpc, member.terms, await clock())) === null;
     }
 
     /** Bring one member up to date: notice a cancellation, charge a period that is due. */

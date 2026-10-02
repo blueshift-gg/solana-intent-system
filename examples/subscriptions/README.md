@@ -33,7 +33,7 @@ from the chain.
 
 ## Wallets
 
-The site is an ordinary Wallet Standard dapp. A subscription is a mandate, so the reader
+The site is an ordinary Wallet Standard dapp. A subscription is a policy, so the reader
 approves it with one transaction, which every wallet can sign.
 
 `src/wallet.ts` is a dev-only wallet that lives in the page, so nothing needs installing.

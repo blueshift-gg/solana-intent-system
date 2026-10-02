@@ -1,4 +1,4 @@
-import { fetchMandate } from '@mandate/sdk';
+import { fetchPolicy } from '@mandate/sdk';
 import QRCode from 'qrcode';
 import { useEffect, useRef, useState } from 'react';
 
@@ -53,8 +53,8 @@ export function Screen() {
         }
         if (s.alice) setAlice((await usdcOf(s.alice))?.amount ?? 0n);
         if (s.budget) {
-            const mandate = await fetchMandate(rpc, unb64(s.budget.terms), s.clock);
-            setToday(mandate?.spent[0] ?? 0n);
+            const policy = await fetchPolicy(rpc, unb64(s.budget.terms), s.clock);
+            setToday(policy?.spent[0] ?? 0n);
         }
     }), []);
 

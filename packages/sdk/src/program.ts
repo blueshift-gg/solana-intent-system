@@ -14,15 +14,15 @@ import {
 export const MANDATE_PROGRAM_ADDRESS = address('Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A');
 /** The SPL delegate of every enabled token account, and the event signer. */
 export const ENGINE_ADDRESS = address('6NpP2w9pBwSWBkQ7yNPYo5ruPY47goYB8DNsjBuKGyHp');
-import { decode, mandateId } from './terms.ts';
+import { decode, termsId } from './terms.ts';
 
 const SYSTEM = address('11111111111111111111111111111111');
 const TOKEN_PROGRAM = address('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
 const key = (a: Address) => getAddressEncoder().encode(a);
 
-export const findMandatePda = async (authority: Address, id: Uint8Array) =>
-    (await getProgramDerivedAddress({ programAddress: MANDATE_PROGRAM_ADDRESS, seeds: ['mandate', key(authority), id] }))[0];
+export const findPolicyPda = async (authority: Address, id: Uint8Array) =>
+    (await getProgramDerivedAddress({ programAddress: MANDATE_PROGRAM_ADDRESS, seeds: ['policy', key(authority), id] }))[0];
 
 /** The page of nonces for intents of `authority` that expire at `notAfter`: one page per day of expiry. */
 export const findNoncesPda = async (authority: Address, notAfter: number) =>
@@ -33,12 +33,12 @@ const writable = (a: Address): AccountMeta => ({ address: a, role: AccountRole.W
 const readonly = (a: Address): AccountMeta => ({ address: a, role: AccountRole.READONLY });
 const tail = [readonly(ENGINE_ADDRESS), readonly(MANDATE_PROGRAM_ADDRESS)];
 
-/** The address of the mandate for canonical `terms`. */
-export const mandateAddress = async (terms: Uint8Array) => findMandatePda(decode(terms).authority, await mandateId(terms));
+/** The address of the policy for canonical `terms`. */
+export const policyAddress = async (terms: Uint8Array) => findPolicyPda(decode(terms).authority, await termsId(terms));
 
 /**
  * Enable a token account: SPL `Approve` the engine as its delegate. `amount`
- * caps what every mandate and intent on the account can pull in total; leave
+ * caps what every policy and intent on the account can pull in total; leave
  * it out for no cap beyond their own limits.
  */
 export const getEnableInstruction = (p: { owner: TransactionSigner; account: Address; amount?: bigint; tokenProgram?: Address }): Instruction => ({
@@ -48,12 +48,12 @@ export const getEnableInstruction = (p: { owner: TransactionSigner; account: Add
 });
 
 /**
- * Put a mandate on chain: a standing permission its spender uses with pulls.
+ * Put a policy on chain: a standing permission its spender uses with pulls.
  * The authority signs; `payer` funds the rent and gets it back when the
- * mandate closes.
+ * policy closes.
  */
 export const getCreateInstruction = async (p: { authority: TransactionSigner; payer: TransactionSigner; terms: Uint8Array }): Promise<Instruction> => ({
-    accounts: [signer(p.authority), signer(p.payer, AccountRole.WRITABLE_SIGNER), writable(await mandateAddress(p.terms)), readonly(SYSTEM), ...tail],
+    accounts: [signer(p.authority), signer(p.payer, AccountRole.WRITABLE_SIGNER), writable(await policyAddress(p.terms)), readonly(SYSTEM), ...tail],
     data: Uint8Array.of(0, ...p.terms),
     programAddress: MANDATE_PROGRAM_ADDRESS,
 });
@@ -71,13 +71,13 @@ function legs(p: Legs & { from: Address }): AccountMeta[] {
 }
 
 /**
- * Take `amount` under a mandate, from `from` (a token account its terms
+ * Take `amount` under a policy, from `from` (a token account its terms
  * limit) into `to`. If the terms have a price, `payFrom` is the spender's
  * token account that pays it; the program moves the payment itself and
  * checks what arrives.
  */
 export const getPullInstruction = async (p: Legs & { spender: TransactionSigner; from: Address; amount: bigint }): Promise<Instruction> => ({
-    accounts: [signer(p.spender), writable(await mandateAddress(p.terms)), ...legs(p)],
+    accounts: [signer(p.spender), writable(await policyAddress(p.terms)), ...legs(p)],
     data: Uint8Array.of(1, ...getU64Encoder().encode(p.amount)),
     programAddress: MANDATE_PROGRAM_ADDRESS,
 });
@@ -125,7 +125,7 @@ export const getCancelInstruction = async (p: { authority: TransactionSigner; pa
 
 /**
  * Close `account` and return its rent to `payer`, the account that paid it.
- * A mandate (`mandateAddress`): its authority or spender at any time, anyone
+ * A policy (`policyAddress`): its authority or spender at any time, anyone
  * after its expiry. A page of nonces (`findNoncesPda`): anyone, once its day
  * is over.
  */
