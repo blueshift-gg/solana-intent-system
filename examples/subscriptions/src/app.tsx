@@ -8,7 +8,7 @@ import {
     getEnableInstruction,
     subscriptionTerms,
     text,
-} from '@mandate/sdk';
+} from '@solana-pull/sdk';
 import { address, type Address, type TransactionModifyingSigner, type TransactionSigner } from '@solana/kit';
 import { useWalletAccountTransactionSigner } from '@solana/react';
 import { fetchMaybeToken } from '@solana-program/token';

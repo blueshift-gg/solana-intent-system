@@ -1,12 +1,12 @@
 // Fathom's backend, as a publisher would run it: it holds the merchant key,
 // keeps the member list, charges each member when their period is over, and
 // serves reports to paying members only. Every charge is one Pull the
-// Mandate program decides; the server cannot take more than a member approved.
+// Pull program decides; the server cannot take more than a member approved.
 import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { decode, fetchPolicy, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
+import { decode, fetchPolicy, getPullInstruction, loadWasm, programError } from '@solana-pull/sdk';
 import {
     address,
     type Address,
@@ -78,7 +78,7 @@ function reply(res: ServerResponse, status: number, value: unknown) {
 export function fathom(): Plugin {
     const members = new Map<Address, Member>();
     const ready = (async () => {
-        await loadMandate(fs.readFileSync(path.resolve('../../packages/sdk/wasm/mandate_bg.wasm')));
+        await loadWasm(fs.readFileSync(path.resolve('../../packages/sdk/wasm/pull_bg.wasm')));
         const signer = await generateKeyPairSigner();
         await cheat('requestAirdrop', [signer.address, 5_000_000_000]);
         await cheat('surfnet_setTokenAccount', [signer.address, USDC, { amount: 0 }, TOKEN_PROGRAM_ADDRESS]);
@@ -124,7 +124,7 @@ export function fathom(): Plugin {
             return { ok: false as const, reason: 'NotConfirmed' };
         } catch (error) {
             for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
-                if (isSolanaError(e, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM)) return { ok: false as const, reason: mandateError(Number(e.context.code)) ?? 'InsufficientFunds' };
+                if (isSolanaError(e, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM)) return { ok: false as const, reason: programError(Number(e.context.code)) ?? 'InsufficientFunds' };
             }
             return { ok: false as const, reason: error instanceof Error ? error.message : String(error) };
         }

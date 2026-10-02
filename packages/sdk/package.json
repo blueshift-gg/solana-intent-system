@@ -1,7 +1,7 @@
 {
-    "name": "@mandate/sdk",
+    "name": "@solana-pull/sdk",
     "version": "0.0.1",
-    "description": "Mandate for @solana/kit: terms, instructions and accounts",
+    "description": "The Pull program for @solana/kit: terms, instructions and accounts",
     "license": "MIT",
     "private": true,
     "type": "module",
@@ -9,7 +9,7 @@
     "main": "./src/index.ts",
     "types": "./src/index.ts",
     "scripts": {
-        "build": "wasm-pack build ../mandate-wasm --target web --release --out-dir ../sdk/wasm --out-name mandate --no-pack -- --features localnet",
+        "build": "wasm-pack build ../pull-wasm --target web --release --out-dir ../sdk/wasm --out-name pull --no-pack -- --features localnet",
         "typecheck": "tsc --noEmit -p ."
     },
     "dependencies": {

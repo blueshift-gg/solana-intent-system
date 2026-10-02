@@ -2,33 +2,33 @@ import type { SolanaSignOffchainMessageOutput } from '@solana/wallet-standard-fe
 import type { WalletAccount, WalletWithFeatures } from '@wallet-standard/base';
 
 import type {
-    SolanaSignMandateFeature,
-    SolanaSignMandateInput,
-    SolanaSignMandateOutput,
-} from '../signMandate.js';
-import { SolanaSignMandate } from '../signMandate.js';
+    SolanaSignIntentFeature,
+    SolanaSignIntentInput,
+    SolanaSignIntentOutput,
+} from '../signIntent.js';
+import { SolanaSignIntent } from '../signIntent.js';
 
 const account = null as unknown as WalletAccount;
 
-// [DESCRIBE] `SolanaSignMandateInput`
+// [DESCRIBE] `SolanaSignIntentInput`
 {
     // The account and the canonical terms are all a dapp sends: no text.
     {
-        ({ account, terms: new Uint8Array() }) satisfies SolanaSignMandateInput;
+        ({ account, terms: new Uint8Array() }) satisfies SolanaSignIntentInput;
     }
 
     // Text is not an input.
     {
         // @ts-expect-error The wallet renders the text itself.
-        ({ account, terms: new Uint8Array(), message: '' }) satisfies SolanaSignMandateInput;
+        ({ account, terms: new Uint8Array(), message: '' }) satisfies SolanaSignIntentInput;
     }
 }
 
-// [DESCRIBE] `SolanaSignMandateOutput`
+// [DESCRIBE] `SolanaSignIntentOutput`
 {
     // It is exactly the Offchain Message output, so verifiers need nothing new.
     {
-        const output = null as unknown as SolanaSignMandateOutput;
+        const output = null as unknown as SolanaSignIntentOutput;
         output satisfies SolanaSignOffchainMessageOutput;
     }
 }
@@ -37,9 +37,9 @@ const account = null as unknown as WalletAccount;
 {
     // A dapp narrows a wallet to one that supports the feature, then calls it.
     {
-        const wallet = null as unknown as WalletWithFeatures<SolanaSignMandateFeature>;
-        const feature = wallet.features[SolanaSignMandate];
+        const wallet = null as unknown as WalletWithFeatures<SolanaSignIntentFeature>;
+        const feature = wallet.features[SolanaSignIntent];
         feature.supportedTermsVersions satisfies readonly 1[];
-        void feature.signMandate({ account, terms: new Uint8Array() });
+        void feature.signIntent({ account, terms: new Uint8Array() });
     }
 }

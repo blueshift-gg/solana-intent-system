@@ -1,9 +1,9 @@
 // Dev only: a Wallet Standard wallet that lives in this page, so the site runs
 // without an extension. It is what a wallet looks like once it implements
-// `solana:signMandate` (packages/wallet-standard): the site sends terms, and
+// `solana:signIntent` (packages/wallet-standard): the site sends terms, and
 // the wallet decodes them, renders the canonical text itself and asks.
 // The key is in localStorage: never use it for real funds.
-import { decode, MANDATE_PROGRAM_ADDRESS, message, text } from '@mandate/sdk';
+import { decode, PULL_PROGRAM_ADDRESS, message, text } from '@solana-pull/sdk';
 import {
     type Address,
     createKeyPairSignerFromPrivateKeyBytes,
@@ -110,15 +110,15 @@ async function summarize(transaction: Uint8Array) {
         const program = compiled.staticAccounts[ix.programAddressIndex];
         const data = ix.data ?? new Uint8Array();
         if (program === TOKEN_PROGRAM_ADDRESS && data[0] === 4) {
-            rows.push(['Turn on', 'Mandates for this token. Each approval you sign still sets its own limit']);
+            rows.push(['Turn on', 'Pull payments for this token. Each approval still sets its own limit']);
         } else if (program === TOKEN_PROGRAM_ADDRESS && data[0] === 5) {
-            rows.push(['Turn off', 'Mandates for this token: every approval stops']);
-        } else if (program === MANDATE_PROGRAM_ADDRESS && data[0] === 0) {
+            rows.push(['Turn off', 'Pull payments for this token: every approval stops']);
+        } else if (program === PULL_PROGRAM_ADDRESS && data[0] === 0) {
             // discriminator, terms_len: u16, terms
             const approval = await describe(new Uint8Array(data.slice(3, 3 + data[1] + data[2] * 256)));
             rows.push(['Approve', 'On chain, with this transaction'], ...approval.rows);
             details += approval.text;
-        } else if (program === MANDATE_PROGRAM_ADDRESS && data[0] === 2) {
+        } else if (program === PULL_PROGRAM_ADDRESS && data[0] === 2) {
             rows.push(['Cancel', 'One approval. It can never be used again, and its rent goes back to whoever paid it']);
         } else {
             rows.push(['Run', `Program ${short(program)}`]);
@@ -130,8 +130,8 @@ async function summarize(transaction: Uint8Array) {
 // Wallets that have not adopted the feature yet, to see the site's fallbacks:
 // `?offchain` signs offchain messages as raw text, `?basic` only signs transactions.
 const query = new URLSearchParams(location.search);
-const mode = query.has('basic') ? 'basic' : query.has('offchain') ? 'offchain' : 'mandate';
-const SIGNING = { basic: [], mandate: ['solana:signMandate'], offchain: ['solana:signOffchainMessage'] } as const;
+const mode = query.has('basic') ? 'basic' : query.has('offchain') ? 'offchain' : 'intent';
+const SIGNING = { basic: [], intent: ['solana:signIntent'], offchain: ['solana:signOffchainMessage'] } as const;
 const chains = ['solana:localnet', 'solana:mainnet'] as const;
 const account = {
     address: signer.address,
@@ -145,8 +145,8 @@ const wallet = {
     accounts: [account],
     chains,
     features: {
-        'solana:signMandate': {
-            signMandate: (...inputs: { terms: Uint8Array }[]) =>
+        'solana:signIntent': {
+            signIntent: (...inputs: { terms: Uint8Array }[]) =>
                 Promise.all(
                     inputs.map(async ({ terms }) => {
                         const bytes = new Uint8Array(terms);
@@ -163,7 +163,7 @@ const wallet = {
             version: '1.0.0',
         },
         'solana:signOffchainMessage': {
-            // A wallet that knows nothing about Mandates: it can only show the text it was given
+            // A wallet that knows nothing about intents: it can only show the text it was given
             signOffchainMessage: (...inputs: { message: string }[]) =>
                 Promise.all(
                     inputs.map(async ({ message: body }) => {
@@ -192,11 +192,11 @@ const wallet = {
         'standard:events': { on: () => () => {}, version: '1.0.0' },
     },
     icon: 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#7c5cff"/><path d="M9 12h14v10H9z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><circle cx="19.5" cy="17" r="1.5" fill="#fff"/></svg>'),
-    name: mode === 'mandate' ? 'Demo Wallet' : `Demo Wallet (${mode})`,
+    name: mode === 'intent' ? 'Demo Wallet' : `Demo Wallet (${mode})`,
     version: '1.0.0',
 };
 
-for (const feature of ['solana:signMandate', 'solana:signOffchainMessage'] as const) {
+for (const feature of ['solana:signIntent', 'solana:signOffchainMessage'] as const) {
     if (!account.features.includes(feature)) delete (wallet.features as Partial<typeof wallet.features>)[feature];
 }
 

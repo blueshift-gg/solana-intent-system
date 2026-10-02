@@ -1,5 +1,5 @@
 //! Terms, canonical encoding and text, account layouts and errors shared by the
-//! Mandate program and its clients.
+//! Pull program and its clients.
 #![no_std]
 
 pub mod constants;
@@ -10,7 +10,7 @@ pub mod terms;
 
 use pinocchio::pubkey::Pubkey;
 
-pub const ID: Pubkey = five8_const::decode_32_const("Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A");
+pub const ID: Pubkey = five8_const::decode_32_const("PULLrgDYqK1yFKVTSbWieX3ARP7U2XUyrjxWXqKgVzA");
 
 /// Anything bytes can be written to: a hasher on chain, a buffer off chain.
 /// Encoding and rendering write through it, so neither needs to allocate.

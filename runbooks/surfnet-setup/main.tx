@@ -3,12 +3,12 @@ addon "svm" {
     network_id = input.network_id
 }
 
-action "install_mandate" "svm::setup_surfnet" {
-    description = "Install the Mandate program at its canonical address via direct account write"
+action "install_pull" "svm::setup_surfnet" {
+    description = "Install the Pull program at its canonical address via direct account write"
     rpc_api_url = input.rpc_api_url
 
     deploy_program {
-        program_id = "Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A"
-        binary_path = "target/deploy/mandate_program.so"
+        program_id = "PULLrgDYqK1yFKVTSbWieX3ARP7U2XUyrjxWXqKgVzA"
+        binary_path = "target/deploy/pull_program.so"
     }
 }

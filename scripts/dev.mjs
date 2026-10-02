@@ -3,12 +3,12 @@
 // surfnet-setup runbook, then serve an example (default: the agents demo).
 import { execSync, spawn } from 'node:child_process';
 
-const PROGRAM = 'Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A';
+const PROGRAM = 'PULLrgDYqK1yFKVTSbWieX3ARP7U2XUyrjxWXqKgVzA';
 const APP = process.argv[2] ?? 'agents';
 const children = [];
 
 execSync('cargo build-sbf --manifest-path program/Cargo.toml --features localnet', { stdio: 'inherit' });
-execSync('npm run build -w @mandate/sdk', { stdio: 'inherit' });
+execSync('npm run build -w @solana-pull/sdk', { stdio: 'inherit' });
 
 function start(command, args, stdio = 'inherit') {
     const child = spawn(command, args, { stdio });
@@ -36,6 +36,6 @@ for (let i = 0; !(await executable().catch(() => false)); i++) {
     await new Promise((r) => setTimeout(r, 500));
 }
 console.log('\nSurfpool: mainnet fork on http://127.0.0.1:8899, Studio on http://127.0.0.1:18488');
-console.log(`Mandate:  ${PROGRAM}\n`);
+console.log(`Program:  ${PROGRAM}\n`);
 
 start('npm', ['run', 'dev', '-w', APP]);

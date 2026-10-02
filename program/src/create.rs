@@ -1,9 +1,9 @@
 use crate::events::emit;
 use crate::helpers::{check_pda, create_pda, sha256};
 use crate::state::Policy;
-use mandate_core::{constants::*, errors::MandateError, terms::Terms};
 use pinocchio::log::sol_log;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pull_core::{constants::*, errors::PullError, terms::Terms};
 
 /// # Create
 ///
@@ -61,13 +61,13 @@ impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Create<'a> {
 
         // Account Checks
         if !authority.is_signer() {
-            return Err(MandateError::NotSigner.into());
+            return Err(PullError::NotSigner.into());
         }
         if terms.authority.ne(authority.key()) {
-            return Err(MandateError::InvalidAuthority.into());
+            return Err(PullError::InvalidAuthority.into());
         }
         if !policy.is_writable() {
-            return Err(MandateError::NotMutable.into());
+            return Err(PullError::NotMutable.into());
         }
 
         Ok(Self {
@@ -92,7 +92,7 @@ impl<'a> Create<'a> {
         let seeds: [&[u8]; 3] = [POLICY_SEED, authority, &id];
         let bump = check_pda(self.policy, &seeds)?;
         if self.policy.is_owned_by(&crate::ID) {
-            return Err(MandateError::AlreadyInitialized.into());
+            return Err(PullError::AlreadyInitialized.into());
         }
 
         // Create it and copy the terms after the header

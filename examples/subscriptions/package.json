@@ -7,8 +7,8 @@
         "typecheck": "tsc --noEmit -p ."
     },
     "dependencies": {
-        "@mandate/sdk": "*",
-        "@mandate/wallet-standard-features": "*",
+        "@solana-pull/sdk": "*",
+        "@solana-pull/wallet-standard-features": "*",
         "@solana-program/token": "^0.17.0",
         "@solana/kit": "^8.4.0",
         "@solana/react": "^8.4.0",

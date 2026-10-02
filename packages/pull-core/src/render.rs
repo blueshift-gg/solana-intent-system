@@ -6,13 +6,13 @@
 
 use crate::{
     constants::{CLUSTER, MAX_TIME},
-    errors::MandateError,
+    errors::PullError,
     terms::{Per, Terms},
     Sink, ID,
 };
 use pinocchio::pubkey::Pubkey;
 
-type Result<T> = core::result::Result<T, MandateError>;
+type Result<T> = core::result::Result<T, PullError>;
 
 /// Offchain Message v1 signing domain.
 pub const DOMAIN: &[u8; 16] = b"\xffsolana offchain";
@@ -33,7 +33,7 @@ pub fn render(
 ) -> Result<()> {
     let mut t = Text { out, decimals };
 
-    t.s("Solana Mandate v1\ncluster: ");
+    t.s("Solana Pull v1\ncluster: ");
     t.s(CLUSTERS[CLUSTER as usize]);
     t.s("\nengine: ");
     t.key(&ID);
@@ -134,7 +134,7 @@ impl<O: Sink, D: Fn(&Pubkey) -> Result<u8>> Text<'_, O, D> {
     /// `YYYY-MM-DDTHH:MM:SSZ`, years 1970–9999 (civil-from-days, H. Hinnant).
     fn time(&mut self, t: i64) -> Result<()> {
         if !(0..=MAX_TIME).contains(&t) {
-            return Err(MandateError::Unrenderable);
+            return Err(PullError::Unrenderable);
         }
         let (days, secs) = (t / 86_400, t % 86_400);
         let z = days + 719_468;

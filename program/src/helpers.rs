@@ -1,6 +1,5 @@
 //! Account lifecycle, token views and transfers, and hashing.
 
-use mandate_core::{constants::*, errors::MandateError};
 use pinocchio::{
     account_info::AccountInfo,
     cpi::invoke_signed,
@@ -10,13 +9,14 @@ use pinocchio::{
     sysvars::{rent::Rent, Sysvar},
     ProgramResult,
 };
+use pull_core::{constants::*, errors::PullError};
 
 /// `account` must be the PDA for `seeds`; returns its bump.
 #[inline(always)]
 pub fn check_pda(account: &AccountInfo, seeds: &[&[u8]]) -> Result<u8, ProgramError> {
     let (key, bump) = find_program_address(seeds, &crate::ID);
     if key.ne(account.key()) {
-        return Err(MandateError::InvalidSeeds.into());
+        return Err(PullError::InvalidSeeds.into());
     }
     Ok(bump)
 }
@@ -86,29 +86,29 @@ pub fn close(account: &AccountInfo, to: &AccountInfo) -> ProgramResult {
 
 /// Token account or mint data, by the base-layout length or Token-2022's
 /// account-type byte after it.
-fn token_data(account: &AccountInfo, base_len: usize, kind: u8) -> Result<&[u8], MandateError> {
+fn token_data(account: &AccountInfo, base_len: usize, kind: u8) -> Result<&[u8], PullError> {
     if !account.is_owned_by(&TOKEN_PROGRAM) && !account.is_owned_by(&TOKEN_2022_PROGRAM) {
-        return Err(MandateError::InvalidTarget);
+        return Err(PullError::InvalidTarget);
     }
     // SAFETY: the program never holds a mutable borrow of a token program's account.
     let data = unsafe { account.borrow_data_unchecked() };
     if data.len() == base_len || (data.len() > 165 && data[165] == kind) {
         return Ok(data);
     }
-    Err(MandateError::InvalidTarget)
+    Err(PullError::InvalidTarget)
 }
 
-pub fn decimals(mint: &AccountInfo) -> Result<u8, MandateError> {
+pub fn decimals(mint: &AccountInfo) -> Result<u8, PullError> {
     Ok(token_data(mint, 82, 1)?[44])
 }
 
 /// The balance of token account `account`, after checking it is what the
 /// terms name: this mint, and the authority's own. The engine is the delegate
 /// of many wallets, so this is what keeps a policy to its authority's funds.
-pub fn balance(account: &AccountInfo, mint: &Pubkey, owner: &Pubkey) -> Result<u64, MandateError> {
+pub fn balance(account: &AccountInfo, mint: &Pubkey, owner: &Pubkey) -> Result<u64, PullError> {
     let data = token_data(account, 165, 2)?;
     if data[..32].ne(mint) || data[32..64].ne(owner) {
-        return Err(MandateError::InvalidTarget);
+        return Err(PullError::InvalidTarget);
     }
     Ok(u64::from_le_bytes(data[64..72].try_into().unwrap()))
 }

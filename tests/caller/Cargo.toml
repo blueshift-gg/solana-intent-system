@@ -1,8 +1,8 @@
 [package]
-name = "mandate-caller"
+name = "pull-caller"
 version = "0.0.1"
 edition = "2021"
-description = "Test fixture: a program that calls the Mandate program by CPI"
+description = "Test fixture: a program that calls the Pull program by CPI"
 publish = false
 license = "MIT"
 
@@ -13,5 +13,5 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-mandate-core = { workspace = true }
+pull-core = { workspace = true }
 pinocchio = { workspace = true }

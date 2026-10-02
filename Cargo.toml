@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["program", "packages/mandate-core", "packages/mandate-wasm", "tests", "tests/caller"]
+members = ["program", "packages/pull-core", "packages/pull-wasm", "tests", "tests/caller"]
 
 [workspace.dependencies]
-mandate-core = { path = "packages/mandate-core", version = "0.0.1" }
+pull-core = { path = "packages/pull-core", version = "0.0.1" }
 pinocchio = { version = "=0.8.4", default-features = false }
 
 # Limits and bounds use checked arithmetic as well as runtime overflow checks.

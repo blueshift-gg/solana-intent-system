@@ -9,7 +9,7 @@ const read = async (rpc: Rpc<SolanaRpcApi>, account: Parameters<Rpc<SolanaRpcApi
 };
 
 /**
- * A mandate's account: null if it is not on chain (never created, or closed).
+ * A policy's account: null if it is not on chain (never created, or closed).
  * `spent` is what each limit has consumed at `now` (pass the Clock sysvar's
  * time): a periodic limit starts every window at zero, as in the program.
  */

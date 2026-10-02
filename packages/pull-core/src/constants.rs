@@ -27,8 +27,8 @@ pub const TOKEN_2022_PROGRAM: Pubkey =
 /// Engine PDA: [ENGINE_SEED]. The SPL delegate of every enabled token account
 /// and the signer of every event; the test suite re-derives it.
 pub const ENGINE_SEED: &[u8] = b"engine";
-pub const ENGINE: Pubkey = decode_32_const("6NpP2w9pBwSWBkQ7yNPYo5ruPY47goYB8DNsjBuKGyHp");
-pub const ENGINE_BUMP: u8 = 254;
+pub const ENGINE: Pubkey = decode_32_const("58eSE1WJDvzrwz7BZ23sbsDiqa75pxetzkyRyUcPwb6E");
+pub const ENGINE_BUMP: u8 = 255;
 /// Policy PDA: [POLICY_SEED, authority, sha256(terms)]. The authority is a
 /// seed so nobody can pre-create another authority's policy.
 pub const POLICY_SEED: &[u8] = b"policy";

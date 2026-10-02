@@ -1,4 +1,4 @@
-# Solana Intent System
+# Solana Pull Program
 
 A Solana program that lets a wallet owner permit someone to move its tokens, within
 limits, without giving up custody.
@@ -54,9 +54,9 @@ it that persists.
 ## What an intent signs
 
 ```text
-Solana Mandate v1
+Solana Pull v1
 cluster: localnet
-engine: Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A
+engine: PULLrgDYqK1yFKVTSbWieX3ARP7U2XUyrjxWXqKgVzA
 authority: A9XwnWUxXn1HH1MPzxe5MqfYaKvEHtdQMCoDd72QjPLN
 SPENDER: anyone
 MAY TAKE: at most 100.000000 of mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v from 6NSx1jcpyqzHDFHwC7RXm4LZy53gNsMZWpV3P8vr8k4M in total
@@ -118,26 +118,6 @@ LiteSVM, the instruction alone, one run each:
 `Create`, and the first `Fill` or `Cancel` in a page of nonces, also pay a PDA bump
 search, which varies by a few thousand.
 
-## Limits
-
-- Not audited, and its invariants are not model-checked.
-- The program is upgradeable and is the delegate of every account that enables it.
-- A token account has one delegate. Any other `Approve` on it disables its policies and intents.
-- Token accounts only. Native SOL has to be wrapped.
-- Enabling a token account is an SPL `Approve`, which is a transaction. Its amount caps
-  what every policy and intent on the account can pull in total; the SDK's
-  `getEnableInstruction` takes it as an option and approves without a cap when it is
-  left out.
-- A spender that delivers something to the owner must already hold it.
-- The owner receives one token, into one account, and each use delivers all of it. An
-  order that should fill in parts is signed as several intents.
-- Token-2022 transfer hooks are not forwarded. A transfer fee comes out of what the
-  spender receives, never out of the owner beyond the limit; a payment to the owner in a
-  fee-bearing token is refused unless all of it arrives.
-- `Fill` called from another program is not tested; `Pull` is.
-- No wallet implements `solana:signMandate`, and no wallet has been tested signing the
-  text as an Offchain Message v1.
-
 ## Build
 
 ```sh
@@ -155,9 +135,9 @@ npm run dev:subscriptions    # examples/subscriptions
 | Path | Holds |
 |---|---|
 | [`program`](program) | The engine |
-| [`packages/mandate-core`](packages/mandate-core) | Terms, validity rules, the canonical text and the account layouts, shared by the program and every client |
-| [`packages/sdk`](packages/sdk) | `@solana/kit` builders plus `mandate-core` compiled to WebAssembly |
-| [`packages/wallet-standard`](packages/wallet-standard) | `solana:signMandate`, the one feature a wallet adds to sign intents |
+| [`packages/pull-core`](packages/pull-core) | Terms, validity rules, the canonical text and the account layouts, shared by the program and every client |
+| [`packages/sdk`](packages/sdk) | `@solana/kit` builders plus `pull-core` compiled to WebAssembly |
+| [`packages/wallet-standard`](packages/wallet-standard) | `solana:signIntent`, the one feature a wallet adds to sign intents |
 | [`examples`](examples) | The agent demo and the subscription site, both built on policies |
 | [`tests`](tests) | LiteSVM flows, a randomized check of the limits against a reference model, and the canonical-text tests |
 

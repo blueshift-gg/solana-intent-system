@@ -7,7 +7,7 @@
         "typecheck": "tsc --noEmit -p ."
     },
     "dependencies": {
-        "@mandate/sdk": "*",
+        "@solana-pull/sdk": "*",
         "@solana-program/token": "^0.17.0",
         "@solana/kit": "^8.4.0",
         "@solana/sysvars": "^8.4.0",

@@ -1,10 +1,10 @@
 import './styles.css';
 
-import { loadMandate } from '@mandate/sdk';
+import { loadWasm } from '@solana-pull/sdk';
 import { createRoot } from 'react-dom/client';
 
 import { Phone } from './phone.tsx';
 import { Screen } from './screen.tsx';
 
-await loadMandate();
+await loadWasm();
 createRoot(document.getElementById('root')!).render(location.pathname.startsWith('/phone') ? <Phone /> : <Screen />);

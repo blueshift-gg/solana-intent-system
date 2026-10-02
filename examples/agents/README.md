@@ -27,7 +27,7 @@ No phone at hand: open `/phone` in a narrow window next to the screen.
 ## How it works
 
 ```text
-agent ──GET /api/analytics──▶ API: 402 { scheme: "mandate", amount, payTo }
+agent ──GET /api/analytics──▶ API: 402 { scheme: "pull", amount, payTo }
 agent ──GET + X-PAYMENT: the terms of Alice's budget──▶ API
     API checks the budget pays this API, then settles on chain:
     Pull $0.05 → 200 + data
@@ -35,13 +35,13 @@ agent ──GET + X-PAYMENT: the terms of Alice's budget──▶ API
 
 - **The budget is a policy** (`subscriptionTerms`: at most $1 per day, spendable only
   by the API's key). Alice approves it on her phone with one transaction, which also
-  turns Mandates on for her USDC the first time.
+  turns pull payments on for her USDC the first time.
 - **The API cannot take more than the budget,** nobody else can spend it, and it
   stops working the moment Alice closes it. The program enforces all three, not
   the agent or the API.
 
 | File | Holds |
 |---|---|
-| `server.ts` | The paid API and Mallory's server: 402, verify, settle with `@mandate/sdk` |
+| `server.ts` | The paid API and Mallory's server: 402, verify, settle with `@solana-pull/sdk` |
 | `src/screen.tsx` | The agent loop (x402 client), live stats, QR code, prompt injection |
 | `src/phone.tsx` | Alice's wallet: fund, approve (`Create`), revoke (`Close`) |

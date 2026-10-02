@@ -4,7 +4,6 @@
 //!
 //! Wire layout: `[EVENT_DISCRIMINATOR, instruction discriminator, fields in order]`.
 
-use mandate_core::{constants::*, errors::MandateError, Sink};
 use pinocchio::{
     account_info::AccountInfo,
     cpi::invoke_signed,
@@ -12,6 +11,7 @@ use pinocchio::{
     program_error::ProgramError,
     ProgramResult,
 };
+use pull_core::{constants::*, errors::PullError, Sink};
 
 /// The instruction every event CPI targets. It does nothing; the inner
 /// instruction's data is the event.
@@ -20,7 +20,7 @@ pub fn emit_event(accounts: &[AccountInfo]) -> ProgramResult {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     if !engine.is_signer() || engine.key().ne(&ENGINE) {
-        return Err(MandateError::InvalidEventAuthority.into());
+        return Err(PullError::InvalidEventAuthority.into());
     }
     Ok(())
 }

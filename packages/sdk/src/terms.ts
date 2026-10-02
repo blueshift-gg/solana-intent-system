@@ -1,10 +1,10 @@
 import { type Address, getAddressEncoder } from '@solana/kit';
 
-import init, { decodeTerms, encodeTerms, errorName, renderText } from '../wasm/mandate.js';
+import init, { decodeTerms, encodeTerms, errorName, renderText } from '../wasm/pull.js';
 
 /**
  * Terms as JSON. Encoding, validation and the canonical text all
- * come from `mandate-core` compiled to WebAssembly, the same code the program
+ * come from `pull-core` compiled to WebAssembly, the same code the program
  * runs: this package never reimplements them. Integers that can pass 2^53 are
  * strings.
  */
@@ -49,7 +49,7 @@ export type Receive = {
 let loaded: Promise<unknown> | undefined;
 
 /** Load the WebAssembly once. Browsers fetch it; Node passes the bytes. */
-export function loadMandate(module?: BufferSource) {
+export function loadWasm(module?: BufferSource) {
     loaded ??= init(module ? { module_or_path: module } : undefined);
     return loaded;
 }
@@ -63,8 +63,8 @@ export const decode = (bytes: Uint8Array): Terms => JSON.parse(decodeTerms(bytes
 export const text = (bytes: Uint8Array, decimals: Record<string, number>): string =>
     renderText(bytes, JSON.stringify(decimals));
 
-/** The name of a Mandate program error code (`Custom(code)` in a failed transaction). */
-export const mandateError = (code: number): string | undefined => errorName(code);
+/** The name of a Pull program error code (`Custom(code)` in a failed transaction). */
+export const programError = (code: number): string | undefined => errorName(code);
 
 /**
  * The exact bytes a wallet signs for signed terms: the Offchain Message v1

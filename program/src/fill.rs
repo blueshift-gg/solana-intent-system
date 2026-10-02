@@ -3,11 +3,11 @@ use crate::helpers::decimals;
 use crate::pull::Legs;
 use crate::state::nonces_for;
 use brine_ed25519::hasher::{FastSha512, Hasher};
-use mandate_core::render::{envelope, render};
-use mandate_core::{errors::MandateError, terms::Terms, Sink};
 use pinocchio::log::sol_log;
 use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pull_core::render::{envelope, render};
+use pull_core::{errors::PullError, terms::Terms, Sink};
 
 /// # Fill
 ///
@@ -92,17 +92,17 @@ impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Fill<'a> {
         // Instruction Checks
         let terms = Terms::decode(bytes)?;
         // One use needs an end, and one source so the text names every mint this instruction holds
-        let not_after = terms.not_after.ok_or(MandateError::InvalidIntent)?;
+        let not_after = terms.not_after.ok_or(PullError::InvalidIntent)?;
         if terms.limits().iter().any(|l| l.from.ne(from.key())) {
-            return Err(MandateError::InvalidIntent.into());
+            return Err(PullError::InvalidIntent.into());
         }
 
         // Account Checks
         if !spender.is_signer() {
-            return Err(MandateError::NotSigner.into());
+            return Err(PullError::NotSigner.into());
         }
         if !nonces.is_writable() {
-            return Err(MandateError::NotMutable.into());
+            return Err(PullError::NotMutable.into());
         }
 
         Ok(Self {
@@ -136,10 +136,10 @@ impl<'a> Fill<'a> {
         // One use: every limit starts unspent, whatever it counts over
         for limit in terms.limits() {
             if limit.mint.ne(legs.mint.key()) {
-                return Err(MandateError::InvalidTarget.into());
+                return Err(PullError::InvalidTarget.into());
             }
             if amount > limit.max {
-                return Err(MandateError::LimitExceeded.into());
+                return Err(PullError::LimitExceeded.into());
             }
         }
         self.verify()?;
@@ -153,7 +153,7 @@ impl<'a> Fill<'a> {
             terms.salt,
         )?;
         if !page.take(terms.salt) {
-            return Err(MandateError::NonceUsed.into());
+            return Err(PullError::NonceUsed.into());
         }
 
         let paid = legs.settle(terms, amount, now)?;
@@ -192,7 +192,7 @@ impl<'a> Fill<'a> {
         let mints = core::iter::once(self.legs.mint).chain(self.legs.payment.get(1));
         let decimals = |mint: &[u8; 32]| {
             let account = mints.clone().find(|m| m.key().eq(mint));
-            decimals(account.ok_or(MandateError::InvalidTarget)?)
+            decimals(account.ok_or(PullError::InvalidTarget)?)
         };
         render(terms, decimals, &mut challenge)?;
 
@@ -201,6 +201,6 @@ impl<'a> Fill<'a> {
             self.signature,
             &challenge.0.finalize(),
         )
-        .map_err(|_| MandateError::InvalidSignature.into())
+        .map_err(|_| PullError::InvalidSignature.into())
     }
 }

@@ -1533,64 +1533,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
-name = "mandate-caller"
-version = "0.0.1"
-dependencies = [
- "mandate-core",
- "pinocchio",
-]
-
-[[package]]
-name = "mandate-core"
-version = "0.0.1"
-dependencies = [
- "five8",
- "five8_const 1.0.0",
- "pinocchio",
-]
-
-[[package]]
-name = "mandate-program"
-version = "0.0.1"
-dependencies = [
- "brine-ed25519",
- "mandate-core",
- "pinocchio",
- "pinocchio-system",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "mandate-tests"
-version = "0.0.1"
-dependencies = [
- "ed25519-dalek",
- "litesvm",
- "litesvm-token",
- "mandate-core",
- "sha2 0.10.9",
- "solana-account",
- "solana-address 2.6.1",
- "solana-clock",
- "solana-instruction",
- "solana-keypair",
- "solana-signer",
- "solana-transaction",
- "spl-token-2022-interface",
-]
-
-[[package]]
-name = "mandate-wasm"
-version = "0.0.1"
-dependencies = [
- "five8",
- "mandate-core",
- "serde",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1895,6 +1837,64 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "pull-caller"
+version = "0.0.1"
+dependencies = [
+ "pinocchio",
+ "pull-core",
+]
+
+[[package]]
+name = "pull-core"
+version = "0.0.1"
+dependencies = [
+ "five8",
+ "five8_const 1.0.0",
+ "pinocchio",
+]
+
+[[package]]
+name = "pull-program"
+version = "0.0.1"
+dependencies = [
+ "brine-ed25519",
+ "pinocchio",
+ "pinocchio-system",
+ "pull-core",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "pull-tests"
+version = "0.0.1"
+dependencies = [
+ "ed25519-dalek",
+ "litesvm",
+ "litesvm-token",
+ "pull-core",
+ "sha2 0.10.9",
+ "solana-account",
+ "solana-address 2.6.1",
+ "solana-clock",
+ "solana-instruction",
+ "solana-keypair",
+ "solana-signer",
+ "solana-transaction",
+ "spl-token-2022-interface",
+]
+
+[[package]]
+name = "pull-wasm"
+version = "0.0.1"
+dependencies = [
+ "five8",
+ "pull-core",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]

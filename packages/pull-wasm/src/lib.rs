@@ -1,11 +1,11 @@
-//! mandate-core for JavaScript. Terms cross the boundary as JSON; bytes and
+//! pull-core for JavaScript. Terms cross the boundary as JSON; bytes and
 //! text come from the same code the program runs, so no JavaScript
 //! reimplements the codec, the validity rules or the canonical text.
 //!
 //! Integers that can exceed 2^53 (amounts, the salt) are strings.
 
-use mandate_core::render::render;
-use mandate_core::terms::{Decay, Limit, Per, Receive, Terms};
+use pull_core::render::render;
+use pull_core::terms::{Decay, Limit, Per, Receive, Terms};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -168,7 +168,7 @@ pub fn render_text(bytes: &[u8], decimals: &str) -> Result<String, JsError> {
             decimals
                 .get(&b58(mint))
                 .copied()
-                .ok_or(mandate_core::errors::MandateError::InvalidTarget)
+                .ok_or(pull_core::errors::PullError::InvalidTarget)
         },
         &mut out,
     )
@@ -176,10 +176,10 @@ pub fn render_text(bytes: &[u8], decimals: &str) -> Result<String, JsError> {
     Ok(String::from_utf8(out).expect("canonical text is ASCII"))
 }
 
-/// The name of a Mandate program error code, as a client sees it in a failed transaction.
+/// The name of a Pull program error code, as a client sees it in a failed transaction.
 #[wasm_bindgen(js_name = errorName)]
 pub fn error_name(code: u32) -> Option<String> {
-    mandate_core::errors::MandateError::ALL
+    pull_core::errors::PullError::ALL
         .get(code as usize)
         .map(|e| format!("{e:?}"))
 }
@@ -196,6 +196,6 @@ fn b58(key: &[u8; 32]) -> String {
     String::from_utf8_lossy(&out[..len]).into_owned()
 }
 
-fn error(e: mandate_core::errors::MandateError) -> JsError {
+fn error(e: pull_core::errors::PullError) -> JsError {
     JsError::new(&format!("{e:?}"))
 }

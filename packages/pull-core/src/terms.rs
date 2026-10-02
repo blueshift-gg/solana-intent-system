@@ -4,10 +4,10 @@
 //! `Terms::decode` is the only way to read terms from bytes. It accepts exactly
 //! the canonical encodings of valid terms, so every other module trusts them.
 
-use crate::{constants::*, errors::MandateError, Sink};
+use crate::{constants::*, errors::PullError, Sink};
 use pinocchio::pubkey::Pubkey;
 
-type Result<T> = core::result::Result<T, MandateError>;
+type Result<T> = core::result::Result<T, PullError>;
 
 const ZERO: Pubkey = [0; 32];
 
@@ -119,7 +119,7 @@ impl<'a> Terms<'a> {
     pub fn decode(bytes: &'a [u8]) -> Result<Self> {
         let mut r = Reader(bytes);
         if r.u8()? != VERSION {
-            return Err(MandateError::MalformedTerms);
+            return Err(PullError::MalformedTerms);
         }
         let cluster = r.u8()?;
         let authority = r.key()?;
@@ -129,7 +129,7 @@ impl<'a> Terms<'a> {
 
         let count = r.u8()? as usize;
         if count > MAX_LIMITS {
-            return Err(MandateError::InvalidTerms);
+            return Err(PullError::InvalidTerms);
         }
         let mut terms = Terms::new(authority, spender, window, salt, &[], None);
         for limit in &mut terms.limits[..count] {
@@ -138,7 +138,7 @@ impl<'a> Terms<'a> {
                 (0, 0) => Per::Total,
                 (1, seconds) => Per::Every(seconds),
                 (2, 0) => Per::Use,
-                _ => return Err(MandateError::MalformedTerms),
+                _ => return Err(PullError::MalformedTerms),
             };
             *limit = Limit {
                 from,
@@ -164,7 +164,7 @@ impl<'a> Terms<'a> {
             })
         })?;
         if !r.0.is_empty() {
-            return Err(MandateError::MalformedTerms);
+            return Err(PullError::MalformedTerms);
         }
         terms.validate()?;
         Ok(terms)
@@ -173,7 +173,7 @@ impl<'a> Terms<'a> {
     /// Everything a decoder must reject beyond malformed bytes.
     pub fn validate(&self) -> Result<()> {
         if self.cluster != CLUSTER {
-            return Err(MandateError::WrongCluster);
+            return Err(PullError::WrongCluster);
         }
         // Every timestamp is renderable, which also keeps time arithmetic from overflowing
         let renderable = |t: i64| (0..=MAX_TIME).contains(&t);
@@ -200,7 +200,7 @@ impl<'a> Terms<'a> {
         // receives. Otherwise the terms pay whoever finds them
         let bound = self.spender.is_some() || self.receive.is_some();
         if !(window && sized && positive && capped && receive && bound) {
-            return Err(MandateError::InvalidTerms);
+            return Err(PullError::InvalidTerms);
         }
         Ok(())
     }
@@ -264,7 +264,7 @@ impl<'a> Reader<'a> {
         let (head, rest) = self
             .0
             .split_first_chunk::<N>()
-            .ok_or(MandateError::MalformedTerms)?;
+            .ok_or(PullError::MalformedTerms)?;
         self.0 = rest;
         Ok(head)
     }
@@ -279,7 +279,7 @@ impl<'a> Reader<'a> {
         match self.u8()? {
             0 => Ok(None),
             1 => read(self).map(Some),
-            _ => Err(MandateError::MalformedTerms),
+            _ => Err(PullError::MalformedTerms),
         }
     }
 }

@@ -1,8 +1,8 @@
 use crate::events::emit;
 use crate::state::nonces_for;
-use mandate_core::errors::MandateError;
 use pinocchio::log::sol_log;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pull_core::errors::PullError;
 
 /// # Cancel
 ///
@@ -56,10 +56,10 @@ impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Cancel<'a> {
 
         // Account Checks
         if !authority.is_signer() {
-            return Err(MandateError::NotSigner.into());
+            return Err(PullError::NotSigner.into());
         }
         if !nonces.is_writable() {
-            return Err(MandateError::NotMutable.into());
+            return Err(PullError::NotMutable.into());
         }
 
         Ok(Self {

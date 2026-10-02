@@ -3,28 +3,28 @@
 //! checked borrow, so callers must not alias a view.
 
 use crate::helpers::{check_pda, create_pda};
-pub use mandate_core::state::{Nonces, Policy};
-use mandate_core::{constants::*, errors::MandateError};
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError};
+pub use pull_core::state::{Nonces, Policy};
+use pull_core::{constants::*, errors::PullError};
 
 /// The account's bytes, after checking its owner, length and tag.
 #[allow(clippy::mut_from_ref)]
 fn bytes(account: &AccountInfo, len: usize, tag: u8) -> Result<&mut [u8], ProgramError> {
     if !account.is_owned_by(&crate::ID) {
-        return Err(MandateError::InvalidAccountOwner.into());
+        return Err(PullError::InvalidAccountOwner.into());
     }
     if account.data_len() < len {
-        return Err(MandateError::InvalidAccountLength.into());
+        return Err(PullError::InvalidAccountLength.into());
     }
     // SAFETY: see the module doc; nothing else borrows the data.
     let data = unsafe { account.borrow_mut_data_unchecked() };
     if data[0] != tag {
-        return Err(MandateError::InvalidTag.into());
+        return Err(PullError::InvalidTag.into());
     }
     Ok(data)
 }
 
-/// A mandate's header and the canonical terms after it.
+/// A policy's header and the canonical terms after it.
 #[allow(clippy::mut_from_ref)]
 pub fn policy(account: &AccountInfo) -> Result<(&mut Policy, &[u8]), ProgramError> {
     let (header, rest) = bytes(account, POLICY_LEN, POLICY_TAG)?.split_at_mut(POLICY_LEN);
@@ -32,7 +32,7 @@ pub fn policy(account: &AccountInfo) -> Result<(&mut Policy, &[u8]), ProgramErro
     let header = unsafe { Policy::from_bytes_unchecked_mut(header) };
     let terms = rest
         .get(..header.terms_len() as usize)
-        .ok_or(MandateError::InvalidAccountLength)?;
+        .ok_or(PullError::InvalidAccountLength)?;
     Ok((header, terms))
 }
 
@@ -58,7 +58,7 @@ pub fn nonces_for<'a>(
         // The page recorded its place when it was created at its PDA
         let page = nonces(account)?;
         if page.authority.ne(authority) || page.day() != day || page.page() != index {
-            return Err(MandateError::InvalidSeeds.into());
+            return Err(PullError::InvalidSeeds.into());
         }
         return Ok(page);
     }

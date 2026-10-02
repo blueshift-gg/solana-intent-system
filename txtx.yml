@@ -1,9 +1,9 @@
 ---
-name: mandate
-id: mandate
+name: solana-pull-program
+id: solana-pull-program
 runbooks:
   - name: surfnet-setup
-    description: Install the Mandate program at its canonical address on a surfnet (no keypair required)
+    description: Install the Pull program at its canonical address on a surfnet (no keypair required)
     location: runbooks/surfnet-setup
 environments:
   localnet:

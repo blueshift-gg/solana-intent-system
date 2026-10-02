@@ -1,5 +1,5 @@
 [package]
-name = "mandate-program"
+name = "pull-program"
 version = "0.0.1"
 edition = "2021"
 description = "Outcome-bound delegated authority for Solana"
@@ -12,14 +12,14 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"
 crate-type = ["cdylib", "lib"]
 
 [features]
-devnet = ["mandate-core/devnet"]
-testnet = ["mandate-core/testnet"]
-localnet = ["mandate-core/localnet"]
+devnet = ["pull-core/devnet"]
+testnet = ["pull-core/testnet"]
+localnet = ["pull-core/localnet"]
 
 [dependencies]
 # In-program SHA-512: the sol_sha512 syscall is not active on every cluster.
 brine-ed25519 = { version = "0.9.3", features = ["fast-sha512"] }
-mandate-core = { workspace = true }
+pull-core = { workspace = true }
 pinocchio = { workspace = true }
 pinocchio-system = "0.2.3"
 

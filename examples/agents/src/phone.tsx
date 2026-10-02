@@ -1,4 +1,4 @@
-import { encode, ENGINE_ADDRESS, fetchPolicy, getCloseInstruction, getCreateInstruction, getEnableInstruction, policyAddress, subscriptionTerms } from '@mandate/sdk';
+import { encode, ENGINE_ADDRESS, fetchPolicy, getCloseInstruction, getCreateInstruction, getEnableInstruction, policyAddress, subscriptionTerms } from '@solana-pull/sdk';
 import { createKeyPairSignerFromPrivateKeyBytes, type KeyPairSigner } from '@solana/kit';
 import { useEffect, useState } from 'react';
 
@@ -6,9 +6,9 @@ import { api, b64, DAY, every, now, rpc, send, type Shared, unb64, usd, USDC, us
 
 /** Alice's key lives in this phone's browser: a demo wallet, not a custody model. */
 async function aliceKey() {
-    const stored = localStorage.getItem('mandate-alice');
+    const stored = localStorage.getItem('pull-alice');
     const seed = stored ? unb64(stored) : crypto.getRandomValues(new Uint8Array(32));
-    localStorage.setItem('mandate-alice', b64(seed));
+    localStorage.setItem('pull-alice', b64(seed));
     return createKeyPairSignerFromPrivateKeyBytes(seed);
 }
 
@@ -59,7 +59,7 @@ export function Phone() {
 
     const approve = act('Approving', async () => {
         const account = await usdcAccount(me!.address);
-        // Once per token: let Mandates use this USDC, $10 across every approval
+        // Once per token: let the Pull program use this USDC, $10 across every approval
         const enable = view!.enabled ? [] : [getEnableInstruction({ account, amount: 10_000_000n, owner: me! })];
         const terms = encode(subscriptionTerms({
             account,
@@ -108,7 +108,7 @@ export function Phone() {
                     <div className="clause gain"><span>Only if</span><b>Every cent reaches Inference API</b></div>
                     <p className="quiet">{view.enabled
                         ? 'One transaction puts the budget on chain. Revoke any time, and the rent comes back.'
-                        : 'First time only: one transaction lets Mandates use your USDC, up to $10 in total. The same transaction sets this budget.'}</p>
+                        : 'First time only: one transaction lets the Pull program use your USDC, up to $10 in total. The same transaction sets this budget.'}</p>
                     <button type="button" className="big go" disabled={!!busy} onClick={approve}>{busy || 'Approve'}</button>
                 </section>
             ) : (

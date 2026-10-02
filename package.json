@@ -1,5 +1,5 @@
 {
-    "name": "mandate",
+    "name": "solana-pull-program",
     "private": true,
     "type": "module",
     "workspaces": ["packages/sdk", "packages/wallet-standard", "examples/subscriptions", "examples/agents"],

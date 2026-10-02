@@ -1,4 +1,4 @@
-//! Test fixture: LiteSVM with the Mandate program, a USDC-like and a SOL-like
+//! Test fixture: LiteSVM with the Pull program, a USDC-like and a SOL-like
 //! mint, funded wallets that enabled the engine, and a builder per instruction.
 //!
 //! Build the program and the CPI caller fixture first:
@@ -10,9 +10,9 @@ use litesvm::{types::TransactionResult, LiteSVM};
 use litesvm_token::{
     get_spl_account, spl_token, Approve, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
-use mandate_core::render::{envelope, render};
-use mandate_core::terms::{Limit, Per, Receive, Terms};
-use mandate_core::{constants::*, errors::MandateError};
+use pull_core::render::{envelope, render};
+use pull_core::terms::{Limit, Per, Receive, Terms};
+use pull_core::{constants::*, errors::PullError};
 use sha2::{Digest, Sha256};
 use solana_address::Address;
 use solana_clock::Clock;
@@ -21,8 +21,8 @@ use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-pub const PROGRAM: Address = Address::new_from_array(mandate_core::ID);
-/// Where the fixture loads `tests/caller`, a program that forwards to Mandate.
+pub const PROGRAM: Address = Address::new_from_array(pull_core::ID);
+/// Where the fixture loads `tests/caller`, a program that forwards to the Pull program.
 pub const CALLER: Address = Address::from_str_const("Ca11er1111111111111111111111111111111111111");
 pub const ENGINE_KEY: Address = Address::new_from_array(ENGINE);
 pub const TOKEN: Address = litesvm_token::TOKEN_ID;
@@ -62,13 +62,13 @@ impl Fixture {
         let mut svm = LiteSVM::new();
         let so = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../target/deploy/mandate_program.so"
+            "/../target/deploy/pull_program.so"
         );
         svm.add_program_from_file(PROGRAM, so)
             .expect("build the program first");
         let caller = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../target/deploy/mandate_caller.so"
+            "/../target/deploy/pull_caller.so"
         );
         svm.add_program_from_file(CALLER, caller)
             .expect("build tests/caller first");
@@ -169,11 +169,11 @@ impl Fixture {
         self.svm.send_transaction(tx)
     }
 
-    pub fn decimals(&self) -> impl Fn(&[u8; 32]) -> Result<u8, MandateError> + '_ {
+    pub fn decimals(&self) -> impl Fn(&[u8; 32]) -> Result<u8, PullError> + '_ {
         |mint| match Address::new_from_array(*mint) {
             m if m == self.usdc => Ok(6),
             m if m == self.sol => Ok(9),
-            _ => Err(MandateError::InvalidTarget),
+            _ => Err(PullError::InvalidTarget),
         }
     }
 }
@@ -193,7 +193,7 @@ pub fn terms_id(bytes: &[u8]) -> [u8; 32] {
 }
 
 /// The canonical text a wallet shows.
-pub fn text(terms: &Terms, decimals: impl Fn(&[u8; 32]) -> Result<u8, MandateError>) -> String {
+pub fn text(terms: &Terms, decimals: impl Fn(&[u8; 32]) -> Result<u8, PullError>) -> String {
     let mut out = Vec::new();
     render(terms, decimals, &mut out).unwrap();
     String::from_utf8(out).unwrap()
@@ -203,7 +203,7 @@ pub fn text(terms: &Terms, decimals: impl Fn(&[u8; 32]) -> Result<u8, MandateErr
 pub fn sign(
     terms: &Terms,
     key: &Keypair,
-    decimals: impl Fn(&[u8; 32]) -> Result<u8, MandateError>,
+    decimals: impl Fn(&[u8; 32]) -> Result<u8, PullError>,
 ) -> [u8; 64] {
     let mut message = Vec::new();
     envelope(terms.authority, &mut message);

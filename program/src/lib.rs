@@ -26,8 +26,8 @@ pub use cancel::Cancel;
 pub use close::Close;
 pub use create::Create;
 pub use fill::Fill;
-pub use mandate_core::{constants, errors, ID};
 pub use pull::Pull;
+pub use pull_core::{constants, errors, ID};
 
 fn process_instruction(
     _program_id: &Pubkey,
@@ -35,7 +35,7 @@ fn process_instruction(
     instruction_data: &[u8],
 ) -> ProgramResult {
     match instruction_data.split_first() {
-        // Mandates: a standing permission on chain. Pull runs on every payment
+        // Policies: a standing permission on chain. Pull runs on every payment
         Some((Pull::DISCRIMINATOR, data)) => Pull::try_from((data, accounts))?.process(),
         Some((Create::DISCRIMINATOR, data)) => Create::try_from((data, accounts))?.process(),
         Some((Close::DISCRIMINATOR, _)) => Close::try_from(accounts)?.process(),

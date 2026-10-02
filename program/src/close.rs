@@ -1,11 +1,11 @@
 use crate::events::emit;
 use crate::helpers::close;
 use crate::state::{nonces, policy};
-use mandate_core::terms::Terms;
-use mandate_core::{constants::*, errors::MandateError};
 use pinocchio::log::sol_log;
 use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pull_core::terms::Terms;
+use pull_core::{constants::*, errors::PullError};
 
 /// # Close
 ///
@@ -57,10 +57,10 @@ impl<'a> TryFrom<&'a [AccountInfo]> for Close<'a> {
 
         // Account Checks
         if !closer.is_signer() {
-            return Err(MandateError::NotSigner.into());
+            return Err(PullError::NotSigner.into());
         }
         if !account.is_writable() || !payer.is_writable() {
-            return Err(MandateError::NotMutable.into());
+            return Err(PullError::NotMutable.into());
         }
 
         Ok(Self {
@@ -95,10 +95,10 @@ impl<'a> Close<'a> {
             }
         };
         if !allowed {
-            return Err(MandateError::NotClosable.into());
+            return Err(PullError::NotClosable.into());
         }
         if payer.ne(self.payer.key()) {
-            return Err(MandateError::InvalidPayer.into());
+            return Err(PullError::InvalidPayer.into());
         }
         close(self.account, self.payer)?;
 

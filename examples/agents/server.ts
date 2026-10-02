@@ -1,7 +1,7 @@
 // The paid API, as its provider would run it: "Inference API" sells on-chain
 // analytics per request over HTTP 402. An agent pays with the budget its
 // owner approved on chain; the server checks the budget pays this API, settles the price
-// on chain with the Mandate program, then serves the data. Real mainnet data,
+// on chain with the Pull program, then serves the data. Real mainnet data,
 // read from the Surfpool fork.
 //
 // Mallory runs a second server that tries to collect with the same budget.
@@ -10,7 +10,7 @@ import os from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { decode, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
+import { decode, getPullInstruction, loadWasm, programError } from '@solana-pull/sdk';
 import {
     address,
     type Address,
@@ -97,7 +97,7 @@ async function settle(executor: Party, budget: Budget, to: Address, amount: bigi
         return { ok: false as const, reason: 'NotConfirmed' };
     } catch (error) {
         for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
-            if (isSolanaError(e, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM)) return { ok: false as const, reason: mandateError(Number(e.context.code)) ?? 'Refused' };
+            if (isSolanaError(e, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM)) return { ok: false as const, reason: programError(Number(e.context.code)) ?? 'Refused' };
         }
         return { ok: false as const, reason: error instanceof Error ? error.message : String(error) };
     }
@@ -126,7 +126,7 @@ const phoneUrl = () => {
 
 export function paidApi(): Plugin {
     const ready = (async () => {
-        await loadMandate(fs.readFileSync(path.resolve('../../packages/sdk/wasm/mandate_bg.wasm')));
+        await loadWasm(fs.readFileSync(path.resolve('../../packages/sdk/wasm/pull_bg.wasm')));
         const [provider, mallory] = await Promise.all([party('Inference API'), party('Mallory')]);
         return { mallory, provider };
     })();
@@ -159,7 +159,7 @@ export function paidApi(): Plugin {
                             return reply(res, 200, {});
                         case '/analytics': {
                             const symbol = url.searchParams.get('token') ?? 'JUP';
-                            const requirement = { accepts: [{ amount: PRICE.toString(), asset: USDC, payTo: provider.usdc, resource: `/api/analytics?token=${symbol}`, scheme: 'mandate' }], x402Version: 1 };
+                            const requirement = { accepts: [{ amount: PRICE.toString(), asset: USDC, payTo: provider.usdc, resource: `/api/analytics?token=${symbol}`, scheme: 'pull' }], x402Version: 1 };
                             const header = req.headers['x-payment'];
                             if (typeof header !== 'string') return reply(res, 402, { ...requirement, error: 'Payment required' });
 

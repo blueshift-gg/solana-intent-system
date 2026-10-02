@@ -1,11 +1,11 @@
 use crate::events::emit;
 use crate::helpers::{balance, transfer};
 use crate::state::policy;
-use mandate_core::errors::MandateError;
-use mandate_core::terms::Terms;
 use pinocchio::log::sol_log;
 use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pull_core::errors::PullError;
+use pull_core::terms::Terms;
 
 /// The accounts a pull moves tokens between, shared by `Pull` and `Fill`.
 pub struct Legs<'a> {
@@ -22,13 +22,13 @@ impl Legs<'_> {
     /// Only inside the window, and only by the spender the terms name.
     pub fn check(&self, terms: &Terms, now: i64) -> ProgramResult {
         if now < terms.not_before {
-            return Err(MandateError::NotYetValid.into());
+            return Err(PullError::NotYetValid.into());
         }
         if terms.not_after.is_some_and(|t| now >= t) {
-            return Err(MandateError::Expired.into());
+            return Err(PullError::Expired.into());
         }
         if terms.spender.is_some_and(|s| s.ne(self.spender.key())) {
-            return Err(MandateError::InvalidSpender.into());
+            return Err(PullError::InvalidSpender.into());
         }
         Ok(())
     }
@@ -47,14 +47,14 @@ impl Legs<'_> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
         if receive.to.ne(pay_to.key()) || receive.mint.ne(pay_mint.key()) {
-            return Err(MandateError::InvalidTarget.into());
+            return Err(PullError::InvalidTarget.into());
         }
         let due = receive.due(now);
         let before = balance(pay_to, receive.mint, terms.authority)?;
         transfer(pay_from, pay_mint, pay_to, self.spender, due)?;
         let after = balance(pay_to, receive.mint, terms.authority)?;
         if after.checked_sub(before).is_none_or(|got| got < due) {
-            return Err(MandateError::NotReceived.into());
+            return Err(PullError::NotReceived.into());
         }
         Ok(due)
     }
@@ -125,10 +125,10 @@ impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Pull<'a> {
 
         // Account Checks
         if !spender.is_signer() {
-            return Err(MandateError::NotSigner.into());
+            return Err(PullError::NotSigner.into());
         }
         if !policy.is_writable() {
-            return Err(MandateError::NotMutable.into());
+            return Err(PullError::NotMutable.into());
         }
 
         Ok(Self {
@@ -168,18 +168,18 @@ impl<'a> Pull<'a> {
             let mut spent = policy.ledger.spent(k, limit.per, terms.not_before, now);
             if limit.from.eq(legs.from.key()) {
                 if limit.mint.ne(legs.mint.key()) {
-                    return Err(MandateError::InvalidTarget.into());
+                    return Err(PullError::InvalidTarget.into());
                 }
-                spent = spent.checked_add(amount).ok_or(MandateError::Overflow)?;
+                spent = spent.checked_add(amount).ok_or(PullError::Overflow)?;
                 if spent > limit.max {
-                    return Err(MandateError::LimitExceeded.into());
+                    return Err(PullError::LimitExceeded.into());
                 }
                 covered = true;
             }
             policy.ledger.set_consumed(k, spent);
         }
         if !covered {
-            return Err(MandateError::InvalidPull.into());
+            return Err(PullError::InvalidPull.into());
         }
         policy.ledger.set_rolled(now);
 

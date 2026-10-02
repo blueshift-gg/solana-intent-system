@@ -1,9 +1,9 @@
 #![allow(clippy::result_large_err)] // LiteSVM's own result type
 
-use mandate_core::constants::*;
-use mandate_core::errors::MandateError;
-use mandate_core::terms::{Decay, Per, Receive};
-use mandate_tests::*;
+use pull_core::constants::*;
+use pull_core::errors::PullError;
+use pull_core::terms::{Decay, Per, Receive};
+use pull_tests::*;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_signer::Signer;
@@ -12,7 +12,7 @@ const DAY: i64 = 86_400;
 const MONTHLY: Per = Per::Every(30 * DAY as u32);
 
 /// Whether `result` failed with exactly this program error.
-fn refused(result: litesvm::types::TransactionResult, error: MandateError) -> bool {
+fn refused(result: litesvm::types::TransactionResult, error: PullError) -> bool {
     let wanted = format!("Custom({})", error as u32);
     result.is_err_and(|e| format!("{:?}", e.err).contains(&wanted))
 }
@@ -51,19 +51,19 @@ fn subscription_is_one_instruction_and_resets_each_period() {
     };
     assert!(refused(
         pull(&mut f, 0, &stranger, USDC),
-        MandateError::InvalidSpender
+        PullError::InvalidSpender
     ));
     pull(&mut f, 0, &merchant, 10 * USDC).unwrap();
     // Nothing more this period; a new period starts full, and unused amounts do not carry over
     assert!(refused(
         pull(&mut f, 29, &merchant, 1),
-        MandateError::LimitExceeded
+        PullError::LimitExceeded
     ));
     pull(&mut f, 30, &merchant, 4 * USDC).unwrap();
     pull(&mut f, 75, &merchant, 10 * USDC).unwrap();
     assert!(refused(
         pull(&mut f, 89, &merchant, 1),
-        MandateError::LimitExceeded
+        PullError::LimitExceeded
     ));
 
     assert_eq!(f.balance(&user.usdc), 76 * USDC);
@@ -102,7 +102,7 @@ fn a_program_collects_a_subscription_by_cpi() {
     f.send(std::slice::from_ref(&ix), &[&merchant.key]).unwrap();
     assert!(refused(
         f.send(&[ix], &[&merchant.key]),
-        MandateError::LimitExceeded
+        PullError::LimitExceeded
     ));
     assert_eq!(f.balance(&merchant.usdc), 10 * USDC);
 }
@@ -146,7 +146,7 @@ fn a_signed_intent_runs_once_and_costs_its_signer_nothing() {
     };
     assert!(refused(
         f.send(&[ix], &[&payee.key]),
-        MandateError::InvalidIntent
+        PullError::InvalidIntent
     ));
 
     // Signed off chain, good for a week: the payee may take up to 10 USDC, once.
@@ -167,22 +167,19 @@ fn a_signed_intent_runs_once_and_costs_its_signer_nothing() {
     );
     assert!(refused(
         f.send(&[theft], &[&stranger.key]),
-        MandateError::InvalidSpender
+        PullError::InvalidSpender
     ));
     let ix = fill(&spender, &week, &signature, take, 10 * USDC + 1, None);
     assert!(refused(
         f.send(&[ix], &[&payee.key]),
-        MandateError::LimitExceeded
+        PullError::LimitExceeded
     ));
 
     // Five days later the payee lands it, taking 6. That was its one use
     f.set_time(NOW + 5 * DAY);
     let ix = fill(&spender, &week, &signature, take, 6 * USDC, None);
     f.send(std::slice::from_ref(&ix), &[&payee.key]).unwrap();
-    assert!(refused(
-        f.send(&[ix], &[&payee.key]),
-        MandateError::NonceUsed
-    ));
+    assert!(refused(f.send(&[ix], &[&payee.key]), PullError::NonceUsed));
     assert_eq!(f.balance(&payee.usdc), 6 * USDC);
     assert_eq!(f.svm.get_balance(&owner).unwrap(), before);
 
@@ -191,10 +188,7 @@ fn a_signed_intent_runs_once_and_costs_its_signer_nothing() {
     let signature = sign(&week, &user.key, f.decimals());
     f.send(&[cancel(&owner, expiry, 1)], &[&user.key]).unwrap();
     let ix = fill(&spender, &week, &signature, take, USDC, None);
-    assert!(refused(
-        f.send(&[ix], &[&payee.key]),
-        MandateError::NonceUsed
-    ));
+    assert!(refused(f.send(&[ix], &[&payee.key]), PullError::NonceUsed));
 
     // Every salt has its own bit: salt 1024 is bit 0 of the next page, and runs
     week.salt = NONCE_BITS as u64;
@@ -209,7 +203,7 @@ fn a_signed_intent_runs_once_and_costs_its_signer_nothing() {
     f.set_time(expiry);
     assert!(refused(
         f.send(std::slice::from_ref(&reclaim), &[&stranger.key]),
-        MandateError::NotClosable
+        PullError::NotClosable
     ));
     let funded = f.svm.get_balance(&spender).unwrap();
     f.set_time(expiry + DAY);
@@ -246,14 +240,11 @@ fn closing_a_policy_returns_the_rent_at_once() {
     // A stranger cannot close it, and the rent cannot go to anyone but its payer.
     // The owner can close, and so can the spender
     let ix = close(&stranger.pubkey(), &policies[0], &payer);
-    assert!(refused(
-        f.send(&[ix], &[&stranger]),
-        MandateError::NotClosable
-    ));
+    assert!(refused(f.send(&[ix], &[&stranger]), PullError::NotClosable));
     let ix = close(&owner, &policies[0], &owner);
     assert!(refused(
         f.send(&[ix], &[&user.key]),
-        MandateError::InvalidPayer
+        PullError::InvalidPayer
     ));
     let ix = close(&owner, &policies[0], &payer);
     f.send(&[ix], &[&user.key]).unwrap();
@@ -303,19 +294,19 @@ fn limits_stack_on_one_account() {
     };
     assert!(refused(
         spend(&mut f, 5 * USDC + 1),
-        MandateError::LimitExceeded
+        PullError::LimitExceeded
     ));
     spend(&mut f, 5 * USDC).unwrap();
     spend(&mut f, 5 * USDC).unwrap();
     assert!(refused(
         spend(&mut f, 2 * USDC + 1),
-        MandateError::LimitExceeded
+        PullError::LimitExceeded
     ));
     spend(&mut f, 2 * USDC).unwrap();
     f.set_time(NOW + DAY);
     spend(&mut f, 5 * USDC).unwrap();
     spend(&mut f, 3 * USDC).unwrap();
-    assert!(refused(spend(&mut f, 1), MandateError::LimitExceeded));
+    assert!(refused(spend(&mut f, 1), PullError::LimitExceeded));
     assert_eq!(f.balance(&agent.usdc), 20 * USDC);
 }
 
@@ -363,10 +354,7 @@ fn anyone_fills_a_signed_order_for_what_the_owner_must_receive() {
 
     // It was one use: a second solver gets nothing
     let ix = fill_by(&f, &second, USDC);
-    assert!(refused(
-        f.send(&[ix], &[&second.key]),
-        MandateError::NonceUsed
-    ));
+    assert!(refused(f.send(&[ix], &[&second.key]), PullError::NonceUsed));
 }
 
 #[test]
@@ -401,10 +389,7 @@ fn dca_runs_once_a_day_for_anyone_who_delivers() {
         f.send(&[ix], &[&keeper.key])
     };
     run(&mut f, &first, 10 * USDC).unwrap();
-    assert!(refused(
-        run(&mut f, &second, 1),
-        MandateError::LimitExceeded
-    ));
+    assert!(refused(run(&mut f, &second, 1), PullError::LimitExceeded));
     f.set_time(NOW + DAY);
     run(&mut f, &second, 10 * USDC).unwrap();
 
@@ -436,7 +421,7 @@ fn a_policy_reaches_only_its_authoritys_accounts() {
     let ix = pull(&key, &key, &bytes, accounts, USDC, None, TOKEN);
     assert!(refused(
         f.send(&[ix], &[&thief.key]),
-        MandateError::InvalidTarget
+        PullError::InvalidTarget
     ));
     assert_eq!(f.balance(&victim.usdc), 100 * USDC);
 }
@@ -534,7 +519,7 @@ fn a_fee_token_never_shorts_the_authority() {
         ));
     assert!(refused(
         f.send(&[ix], &[&merchant.key]),
-        MandateError::NotReceived
+        PullError::NotReceived
     ));
     assert_eq!(f.balance(&user.usdc), 100 * USDC);
 }
@@ -618,7 +603,7 @@ fn random_pulls_never_pass_a_limit() {
                 TOKEN,
             );
             let accepted = f.send(&[ix], &[&merchant.key]).is_ok();
-            assert_eq!(accepted, fits, "mandate {salt}: {limits:?} pull {amount}");
+            assert_eq!(accepted, fits, "policy {salt}: {limits:?} pull {amount}");
 
             if accepted {
                 paid += amount;

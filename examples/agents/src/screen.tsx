@@ -1,4 +1,4 @@
-import { fetchPolicy } from '@mandate/sdk';
+import { fetchPolicy } from '@solana-pull/sdk';
 import QRCode from 'qrcode';
 import { useEffect, useRef, useState } from 'react';
 
@@ -72,9 +72,9 @@ export function Screen() {
             const ask = await fetch(path);
             if (ask.status !== 402) return;
             const offer = await ask.json();
-            say('ask', `GET ${path}  →  402 Payment Required`, `${usd(offer.accepts[0].amount)} to Inference API, scheme "mandate"`);
+            say('ask', `GET ${path}  →  402 Payment Required`, `${usd(offer.accepts[0].amount)} to Inference API, scheme "pull"`);
 
-            const payment = btoa(JSON.stringify({ scheme: 'mandate', ...budgetRef.current }));
+            const payment = btoa(JSON.stringify({ scheme: 'pull', ...budgetRef.current }));
             const res = await fetch(path, { headers: { 'X-PAYMENT': payment } });
             const body = await res.json();
             if (res.ok) {
@@ -113,7 +113,7 @@ export function Screen() {
         <main className="screen">
             <header className="top">
                 <div>
-                    <span className="brand">Mandate</span>
+                    <span className="brand">Pull</span>
                     <h1>An AI agent with a wallet it can’t overspend.</h1>
                 </div>
                 <div className={`status ${status}`}><i />{STATUS[status]}</div>

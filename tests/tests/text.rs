@@ -1,5 +1,5 @@
-use mandate_core::terms::{Decay, Per, Receive, Terms};
-use mandate_tests::*;
+use pull_core::terms::{Decay, Per, Receive, Terms};
+use pull_tests::*;
 use solana_address::Address;
 
 const AUTHORITY: &str = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
@@ -14,7 +14,7 @@ fn key(s: &str) -> [u8; 32] {
     Address::from_str_const(s).to_bytes()
 }
 
-fn decimals(mint: &[u8; 32]) -> Result<u8, mandate_core::errors::MandateError> {
+fn decimals(mint: &[u8; 32]) -> Result<u8, pull_core::errors::PullError> {
     Ok(if *mint == key(USDC_MINT) { 6 } else { 9 })
 }
 
@@ -33,9 +33,9 @@ fn subscription_renders_its_canonical_text() {
 
     assert_eq!(
         text(&terms, decimals),
-        "Solana Mandate v1
+        "Solana Pull v1
 cluster: localnet
-engine: Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A
+engine: PULLrgDYqK1yFKVTSbWieX3ARP7U2XUyrjxWXqKgVzA
 authority: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU
 SPENDER: GNxM82DJMja5ux5extFCEjbQ5C88hvcG7fvsiSCQumgs
 MAY TAKE: at most 8.000000 of mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v from 4dEfGh1uC6pK4CwNa5oZ2bJwmWv6kD6YQX7sKfM5tR2b every 30d
@@ -63,9 +63,9 @@ fn order_renders_its_canonical_text() {
 
     assert_eq!(
         text(&terms, decimals),
-        "Solana Mandate v1
+        "Solana Pull v1
 cluster: localnet
-engine: Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A
+engine: PULLrgDYqK1yFKVTSbWieX3ARP7U2XUyrjxWXqKgVzA
 authority: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU
 SPENDER: anyone
 MAY TAKE: at most 100.000000 of mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v from 4dEfGh1uC6pK4CwNa5oZ2bJwmWv6kD6YQX7sKfM5tR2b in total
@@ -176,7 +176,7 @@ fn every_byte_of_the_terms_is_visible_in_the_text() {
     let render = |bytes: &[u8]| {
         let terms = Terms::decode(bytes).ok()?;
         let mut out = Vec::new();
-        mandate_core::render::render(&terms, |_| Ok(6), &mut out).ok()?;
+        pull_core::render::render(&terms, |_| Ok(6), &mut out).ok()?;
         Some(out)
     };
     for bytes in [encode(&order), encode(&subscription)] {

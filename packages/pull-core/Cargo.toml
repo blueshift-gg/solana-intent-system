@@ -1,8 +1,8 @@
 [package]
-name = "mandate-core"
+name = "pull-core"
 version = "0.0.1"
 edition = "2021"
-description = "Mandate terms, canonical encoding and text, account layouts and errors"
+description = "Pull program terms, canonical encoding and text, account layouts and errors"
 license = "MIT"
 
 [features]
