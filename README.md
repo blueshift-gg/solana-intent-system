@@ -18,8 +18,8 @@ Intent    sign    →  Fill
 `Pull` and `Fill` move tokens out of the owner's account as its SPL delegate, inside
 every limit. If the terms say what the owner must receive, the same instruction moves it
 from the spender to the owner and checks what arrived. Funds stay in the owner's wallet
-until then, and there is nothing between the two transfers to trust. Any program can
-call them.
+until then, and there is nothing between the two transfers to trust. Another program
+can call `Pull`, for example to collect a payment and update its own state together.
 
 | Use | As | Spender | Out | In |
 |---|---|---|---|---|
@@ -134,7 +134,9 @@ search, which varies by a few thousand.
 - Token-2022 transfer hooks are not forwarded. A transfer fee comes out of what the
   spender receives, never out of the owner beyond the limit; a payment to the owner in a
   fee-bearing token is refused unless all of it arrives.
-- No wallet implements `solana:signMandate`. Signing falls back to an offchain message.
+- `Fill` called from another program is not tested; `Pull` is.
+- No wallet implements `solana:signMandate`, and no wallet has been tested signing the
+  text as an Offchain Message v1.
 
 ## Build
 
@@ -153,9 +155,9 @@ npm run dev:subscriptions    # examples/subscriptions
 | Path | Holds |
 |---|---|
 | [`program`](program) | The engine |
-| [`packages/mandate-core`](packages/mandate-core) | Terms, validity rules, the canonical text and the account layout, shared by the program and every client |
+| [`packages/mandate-core`](packages/mandate-core) | Terms, validity rules, the canonical text and the account layouts, shared by the program and every client |
 | [`packages/sdk`](packages/sdk) | `@solana/kit` builders plus `mandate-core` compiled to WebAssembly |
-| [`packages/wallet-standard`](packages/wallet-standard) | `solana:signMandate`, the one feature a wallet adds |
-| [`examples`](examples) | The agent demo and the subscription site |
+| [`packages/wallet-standard`](packages/wallet-standard) | `solana:signMandate`, the one feature a wallet adds to sign intents |
+| [`examples`](examples) | The agent demo and the subscription site, both built on policies |
 | [`tests`](tests) | LiteSVM flows, a randomized check of the limits against a reference model, and the canonical-text tests |
 
