@@ -1,4 +1,5 @@
-//! Terms: types, canonical binary codec and validity rules.
+//! Terms: what an authority permits. Types, canonical binary codec and
+//! validity rules.
 //!
 //! `Terms::decode` is the only way to read terms from bytes. It accepts exactly
 //! the canonical encodings of valid terms, so every other module trusts them.
@@ -8,288 +9,164 @@ use pinocchio::pubkey::Pubkey;
 
 type Result<T> = core::result::Result<T, MandateError>;
 
-/// How a take's limit comes back.
+const ZERO: Pubkey = [0; 32];
+
+/// What a limit counts over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Refill {
-    /// A lifetime total.
-    Never,
-    /// Linearly: all of it over `period` seconds.
-    Over { period: u32 },
-    /// In full for every execution: a per-use cap, on top of a limit that persists.
-    EachUse,
+pub enum Per {
+    /// The life of the mandate.
+    Total,
+    /// Fixed windows of `seconds`, counted from `not_before`. Nothing carries over.
+    Every(u32),
+    /// One pull.
+    Use,
 }
 
 /// "At most `max` of `mint` may leave `from`", a token account of the
-/// authority: the only thing that permits a pull. Takes on one account stack:
-/// a pull must fit every one of them.
+/// authority. Limits on one account stack: a pull must fit every one of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Take<'a> {
+pub struct Limit<'a> {
     pub from: &'a Pubkey,
     pub mint: &'a Pubkey,
     pub max: u64,
-    pub refill: Refill,
-    /// Where a pull may go. Empty: wherever the executor sends it.
-    pub to: &'a [Pubkey],
+    pub per: Per,
 }
 
+/// The rate moves in a straight line to `num` between `t0` and `t1`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Bound {
-    Const(u64),
-    /// Moves from `v0` at `t0` to `v1` at `t1`, clamped outside; truncates toward `v0`.
-    Linear {
-        t0: i64,
-        v0: u64,
-        t1: i64,
-        v1: u64,
-    },
-    /// At least `num / den` of what take `of` gave up, rounded up.
-    Ratio {
-        of: u8,
-        num: u64,
-        den: u64,
-    },
+pub struct Decay {
+    pub t0: i64,
+    pub t1: i64,
+    pub num: u64,
 }
 
-/// Token account `target`, of `mint` and owned by `owner`, must gain at least
-/// `bound` between `Open` and `Close`.
+/// "For every `den` taken, at least `num` of `mint` arrives in `to`", a token
+/// account of the authority. The spender pays it inside the pull.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Require<'a> {
-    pub target: &'a Pubkey,
+pub struct Price<'a> {
+    pub to: &'a Pubkey,
     pub mint: &'a Pubkey,
-    pub owner: &'a Pubkey,
-    pub bound: Bound,
+    pub num: u64,
+    pub den: u64,
+    pub decay: Option<Decay>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Terms<'a> {
     pub cluster: u8,
     pub authority: &'a Pubkey,
-    pub executor: Option<&'a Pubkey>,
+    /// Who may pull. `None` is anyone, which is only valid with a price.
+    pub spender: Option<&'a Pubkey>,
     pub not_before: i64,
     pub not_after: Option<i64>,
-    /// One execution only, whatever it takes.
-    pub once: bool,
-    /// The authority's epoch when the terms were made.
-    pub epoch: u64,
     /// Tells apart mandates whose terms are otherwise identical.
     pub salt: u64,
-    pub takes: Seq<'a, Take<'a>>,
-    pub requires: Seq<'a, Require<'a>>,
+    limits: [Limit<'a>; MAX_LIMITS],
+    count: u8,
+    pub price: Option<Price<'a>>,
 }
 
-/// An element of a `Seq`.
-pub trait Item<'a>: Copy {
-    fn read(r: &mut Reader<'a>) -> Result<Self>;
-    fn write(&self, w: &mut impl Sink);
-}
-
-/// Decoded terms keep their lists encoded and decode them on iteration, so
-/// the program never copies them; builders pass a slice.
-#[derive(Clone, Copy, Debug)]
-pub enum Seq<'a, T> {
-    Encoded { bytes: &'a [u8], len: u8 },
-    List(&'a [T]),
-}
-
-impl<'a, T: Item<'a>> Seq<'a, T> {
-    pub fn len(&self) -> usize {
-        match self {
-            Seq::Encoded { len, .. } => *len as usize,
-            Seq::List(list) => list.len(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn iter(&self) -> SeqIter<'a, T> {
-        match *self {
-            Seq::Encoded { bytes, len } => SeqIter::Encoded(Reader(bytes), len),
-            Seq::List(list) => SeqIter::List(list.iter()),
-        }
-    }
-
-    pub fn get(&self, index: usize) -> Option<T> {
-        self.iter().nth(index)
-    }
-
-    /// Read a length-prefixed list, decoding every element once.
-    fn read(r: &mut Reader<'a>) -> Result<Self> {
-        let len = r.u8()?;
-        let start = r.0;
-        for _ in 0..len {
-            T::read(r)?;
-        }
-        let bytes = &start[..start.len() - r.0.len()];
-        Ok(Seq::Encoded { bytes, len })
-    }
-
-    fn write(&self, w: &mut impl Sink) {
-        w.put(&[self.len() as u8]);
-        match self {
-            Seq::Encoded { bytes, .. } => w.put(bytes),
-            Seq::List(list) => list.iter().for_each(|x| x.write(w)),
-        }
-    }
-}
-
-pub enum SeqIter<'a, T> {
-    Encoded(Reader<'a>, u8),
-    List(core::slice::Iter<'a, T>),
-}
-
-impl<'a, T: Item<'a>> Iterator for SeqIter<'a, T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<T> {
-        match self {
-            SeqIter::Encoded(reader, left) => {
-                *left = left.checked_sub(1)?;
-                // Encoded lists were decoded once by `Terms::decode`.
-                T::read(reader).ok()
+impl Price<'_> {
+    /// What must arrive for `amount` taken at `now`, rounded up.
+    pub fn due(&self, amount: u64, now: i64) -> Result<u64> {
+        let num = match self.decay {
+            None => self.num,
+            Some(Decay { t0, t1, num }) => {
+                // Truncates toward the starting rate
+                let moved = (num as i128 - self.num as i128) * (now.clamp(t0, t1) - t0) as i128;
+                (self.num as i128 + moved / (t1 - t0) as i128) as u64
             }
-            SeqIter::List(list) => list.next().copied(),
-        }
-    }
-}
-
-impl<'a> Item<'a> for Take<'a> {
-    fn read(r: &mut Reader<'a>) -> Result<Self> {
-        let (from, mint, max) = (r.key()?, r.key()?, r.u64()?);
-        let refill = match r.u8()? {
-            0 => Refill::Never,
-            1 => Refill::Over { period: r.u32()? },
-            2 => Refill::EachUse,
-            _ => return Err(MandateError::MalformedTerms),
         };
-        let to = r.keys()?;
-        Ok(Self {
-            from,
-            mint,
-            max,
-            refill,
-            to,
-        })
-    }
-
-    fn write(&self, w: &mut impl Sink) {
-        w.put(self.from);
-        w.put(self.mint);
-        w.put(&self.max.to_le_bytes());
-        match self.refill {
-            Refill::Never => w.put(&[0]),
-            Refill::Over { period } => {
-                w.put(&[1]);
-                w.put(&period.to_le_bytes());
-            }
-            Refill::EachUse => w.put(&[2]),
-        }
-        w.put(&[self.to.len() as u8]);
-        self.to.iter().for_each(|key| w.put(key));
-    }
-}
-
-impl<'a> Item<'a> for Require<'a> {
-    fn read(r: &mut Reader<'a>) -> Result<Self> {
-        let (target, mint, owner) = (r.key()?, r.key()?, r.key()?);
-        let bound = match r.u8()? {
-            0 => Bound::Const(r.u64()?),
-            1 => Bound::Linear {
-                t0: r.i64()?,
-                v0: r.u64()?,
-                t1: r.i64()?,
-                v1: r.u64()?,
-            },
-            2 => Bound::Ratio {
-                of: r.u8()?,
-                num: r.u64()?,
-                den: r.u64()?,
-            },
-            _ => return Err(MandateError::MalformedTerms),
-        };
-        Ok(Self {
-            target,
-            mint,
-            owner,
-            bound,
-        })
-    }
-
-    fn write(&self, w: &mut impl Sink) {
-        w.put(self.target);
-        w.put(self.mint);
-        w.put(self.owner);
-        match self.bound {
-            Bound::Const(c) => {
-                w.put(&[0]);
-                w.put(&c.to_le_bytes());
-            }
-            Bound::Linear { t0, v0, t1, v1 } => {
-                w.put(&[1]);
-                w.put(&t0.to_le_bytes());
-                w.put(&v0.to_le_bytes());
-                w.put(&t1.to_le_bytes());
-                w.put(&v1.to_le_bytes());
-            }
-            Bound::Ratio { of, num, den } => {
-                w.put(&[2, of]);
-                w.put(&num.to_le_bytes());
-                w.put(&den.to_le_bytes());
-            }
-        }
-    }
-}
-
-impl Bound {
-    /// The bound's value at `now`; `taken` is what each take gave up.
-    pub fn at(&self, now: i64, taken: &[u64]) -> Result<u64> {
-        let overflow = MandateError::Overflow;
-        Ok(match *self {
-            Bound::Const(c) => c,
-            Bound::Linear { t0, v0, t1, v1 } => {
-                let t = now.clamp(t0, t1);
-                let moved = (v1 as i128 - v0 as i128) * (t - t0) as i128 / (t1 - t0) as i128;
-                (v0 as i128 + moved) as u64
-            }
-            Bound::Ratio { of, num, den } => {
-                let taken = *taken.get(of as usize).ok_or(overflow)?;
-                let scaled = num as u128 * taken as u128;
-                u64::try_from(scaled.div_ceil(den as u128)).map_err(|_| overflow)?
-            }
-        })
-    }
-
-    /// Positive, renderable, and a ratio of a take that exists.
-    fn check(&self, takes: usize) -> bool {
-        match *self {
-            Bound::Const(c) => c > 0,
-            Bound::Linear { t0, t1, .. } => {
-                (0..=MAX_TIME).contains(&t0) && t0 < t1 && t1 <= MAX_TIME
-            }
-            Bound::Ratio { of, den, .. } => (of as usize) < takes && den > 0,
-        }
+        let due = (amount as u128 * num as u128).div_ceil(self.den as u128);
+        u64::try_from(due).map_err(|_| MandateError::Overflow)
     }
 }
 
 impl<'a> Terms<'a> {
+    /// Terms from their parts, unchecked: `validate` or encode-then-decode them.
+    pub fn new(
+        authority: &'a Pubkey,
+        spender: Option<&'a Pubkey>,
+        window: (i64, Option<i64>),
+        salt: u64,
+        limits: &[Limit<'a>],
+        price: Option<Price<'a>>,
+    ) -> Self {
+        let empty = Limit {
+            from: &ZERO,
+            mint: &ZERO,
+            max: 0,
+            per: Per::Total,
+        };
+        let count = limits.len().min(MAX_LIMITS);
+        let mut list = [empty; MAX_LIMITS];
+        list[..count].copy_from_slice(&limits[..count]);
+        Terms {
+            cluster: CLUSTER,
+            authority,
+            spender,
+            not_before: window.0,
+            not_after: window.1,
+            salt,
+            limits: list,
+            // One past the maximum survives, so `validate` rejects it
+            count: limits.len().min(MAX_LIMITS + 1) as u8,
+            price,
+        }
+    }
+
+    pub fn limits(&self) -> &[Limit<'a>] {
+        &self.limits[..(self.count as usize).min(MAX_LIMITS)]
+    }
+
     pub fn decode(bytes: &'a [u8]) -> Result<Self> {
         let mut r = Reader(bytes);
         if r.u8()? != VERSION {
             return Err(MandateError::MalformedTerms);
         }
-        let terms = Terms {
-            cluster: r.u8()?,
-            authority: r.key()?,
-            executor: r.option(|r| r.key())?,
-            not_before: r.i64()?,
-            not_after: r.option(|r| r.i64())?,
-            once: r.bool()?,
-            epoch: r.u64()?,
-            salt: r.u64()?,
-            takes: Seq::read(&mut r)?,
-            requires: Seq::read(&mut r)?,
-        };
+        let cluster = r.u8()?;
+        let authority = r.key()?;
+        let spender = r.option(|r| r.key())?;
+        let window = (r.i64()?, r.option(|r| r.i64())?);
+        let salt = r.u64()?;
+
+        let count = r.u8()? as usize;
+        if count > MAX_LIMITS {
+            return Err(MandateError::InvalidTerms);
+        }
+        let mut terms = Terms::new(authority, spender, window, salt, &[], None);
+        for limit in &mut terms.limits[..count] {
+            let (from, mint, max) = (r.key()?, r.key()?, r.u64()?);
+            let per = match (r.u8()?, r.u32()?) {
+                (0, 0) => Per::Total,
+                (1, seconds) => Per::Every(seconds),
+                (2, 0) => Per::Use,
+                _ => return Err(MandateError::MalformedTerms),
+            };
+            *limit = Limit {
+                from,
+                mint,
+                max,
+                per,
+            };
+        }
+        terms.cluster = cluster;
+        terms.count = count as u8;
+        terms.price = r.option(|r| {
+            Ok(Price {
+                to: r.key()?,
+                mint: r.key()?,
+                num: r.u64()?,
+                den: r.u64()?,
+                decay: r.option(|r| {
+                    Ok(Decay {
+                        t0: r.i64()?,
+                        t1: r.i64()?,
+                        num: r.u64()?,
+                    })
+                })?,
+            })
+        })?;
         if !r.0.is_empty() {
             return Err(MandateError::MalformedTerms);
         }
@@ -297,7 +174,7 @@ impl<'a> Terms<'a> {
         Ok(terms)
     }
 
-    /// The validity rules: everything a decoder must reject beyond malformed bytes.
+    /// Everything a decoder must reject beyond malformed bytes.
     pub fn validate(&self) -> Result<()> {
         if self.cluster != CLUSTER {
             return Err(MandateError::WrongCluster);
@@ -308,39 +185,27 @@ impl<'a> Terms<'a> {
             && self
                 .not_after
                 .is_none_or(|t| t > self.not_before && renderable(t));
-        let lines = self.takes.len() + self.requires.len();
-        let takes = self
-            .takes
-            .iter()
-            .all(|t| t.max > 0 && t.refill != Refill::Over { period: 0 });
-        // A per-use cap alone bounds nothing across executions: unless the
-        // mandate runs once, every account also needs a limit that persists
-        let capped = self.once
-            || self.takes.iter().all(|t| {
-                let mut on_account = self.takes.iter().filter(|u| u.from == t.from);
-                on_account.any(|u| u.refill != Refill::EachUse)
-            });
-        let requires = self
-            .requires
-            .iter()
-            .all(|x| x.bound.check(self.takes.len()));
-        // Someone must be bound: the executor, where the tokens go, or what
-        // comes back. Otherwise the signature pays whoever holds it
-        let bearer = self.executor.is_none()
-            && self.requires.is_empty()
-            && self.takes.iter().any(|t| t.to.is_empty());
-        // A destination is a payment; a requirement is an exchange. A mandate
-        // is one or the other, so a payment never has to join a session
-        let mixed = !self.requires.is_empty() && self.takes.iter().any(|t| !t.to.is_empty());
-        if !window
-            || self.takes.is_empty()
-            || lines > MAX_ASSERTS
-            || !takes
-            || !capped
-            || bearer
-            || !requires
-            || mixed
-        {
+        let limits = self.limits();
+        let sized = (1..=MAX_LIMITS).contains(&(self.count as usize));
+        let positive = limits.iter().all(|l| l.max > 0 && l.per != Per::Every(0));
+        // A per-use cap alone bounds nothing across pulls: every account
+        // also needs a limit that persists
+        let capped = limits.iter().all(|l| {
+            let mut on_account = limits.iter().filter(|m| m.from == l.from);
+            on_account.any(|m| m.per != Per::Use)
+        });
+        let price = self.price.is_none_or(|p| {
+            // One input token, so "for every `den` taken" has one meaning
+            let one_source = limits.iter().all(|l| l.from == limits[0].from);
+            let decay = p
+                .decay
+                .is_none_or(|d| renderable(d.t0) && renderable(d.t1) && d.t0 < d.t1 && d.num > 0);
+            one_source && p.num > 0 && p.den > 0 && decay
+        });
+        // Someone must be bound: a spender, or a price the owner is paid.
+        // Otherwise the mandate pays whoever finds it
+        let bound = self.spender.is_some() || self.price.is_some();
+        if !(window && sized && positive && capped && price && bound) {
             return Err(MandateError::InvalidTerms);
         }
         Ok(())
@@ -349,36 +214,53 @@ impl<'a> Terms<'a> {
     pub fn write(&self, w: &mut impl Sink) {
         w.put(&[VERSION, self.cluster]);
         w.put(self.authority);
-        match self.executor {
-            None => w.put(&[0]),
-            Some(key) => {
-                w.put(&[1]);
-                w.put(key);
-            }
-        }
+        option(w, self.spender, |w, key| w.put(key));
         w.put(&self.not_before.to_le_bytes());
-        match self.not_after {
-            None => w.put(&[0]),
-            Some(t) => {
-                w.put(&[1]);
-                w.put(&t.to_le_bytes());
-            }
-        }
-        w.put(&[self.once as u8]);
-        w.put(&self.epoch.to_le_bytes());
+        option(w, self.not_after, |w, t| w.put(&t.to_le_bytes()));
         w.put(&self.salt.to_le_bytes());
-        self.takes.write(w);
-        self.requires.write(w);
+        w.put(&[self.count]);
+        for limit in self.limits() {
+            w.put(limit.from);
+            w.put(limit.mint);
+            w.put(&limit.max.to_le_bytes());
+            let (tag, seconds) = match limit.per {
+                Per::Total => (0, 0),
+                Per::Every(seconds) => (1, seconds),
+                Per::Use => (2, 0),
+            };
+            w.put(&[tag]);
+            w.put(&seconds.to_le_bytes());
+        }
+        option(w, self.price, |w, p| {
+            w.put(p.to);
+            w.put(p.mint);
+            w.put(&p.num.to_le_bytes());
+            w.put(&p.den.to_le_bytes());
+            option(w, p.decay, |w, d| {
+                w.put(&d.t0.to_le_bytes());
+                w.put(&d.t1.to_le_bytes());
+                w.put(&d.num.to_le_bytes());
+            });
+        });
+    }
+}
+
+fn option<W: Sink, T>(w: &mut W, value: Option<T>, write: impl FnOnce(&mut W, T)) {
+    match value {
+        None => w.put(&[0]),
+        Some(value) => {
+            w.put(&[1]);
+            write(w, value);
+        }
     }
 }
 
 /// A cursor over canonical bytes. Every read fails on truncation.
-#[derive(Clone, Copy, Debug)]
-pub struct Reader<'a>(pub &'a [u8]);
+struct Reader<'a>(&'a [u8]);
 
 macro_rules! read_le {
     ($($name:ident: $t:ty),*) => {$(
-        pub fn $name(&mut self) -> Result<$t> {
+        fn $name(&mut self) -> Result<$t> {
             Ok(<$t>::from_le_bytes(*self.take()?))
         }
     )*};
@@ -396,27 +278,8 @@ impl<'a> Reader<'a> {
 
     read_le!(u8: u8, u32: u32, u64: u64, i64: i64);
 
-    pub fn key(&mut self) -> Result<&'a Pubkey> {
+    fn key(&mut self) -> Result<&'a Pubkey> {
         self.take()
-    }
-
-    /// A length-prefixed list of keys, viewed in place.
-    fn keys(&mut self) -> Result<&'a [Pubkey]> {
-        let len = self.u8()? as usize * 32;
-        let (head, rest) = self
-            .0
-            .split_at_checked(len)
-            .ok_or(MandateError::MalformedTerms)?;
-        self.0 = rest;
-        Ok(head.as_chunks().0)
-    }
-
-    fn bool(&mut self) -> Result<bool> {
-        match self.u8()? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => Err(MandateError::MalformedTerms),
-        }
     }
 
     fn option<T>(&mut self, read: impl FnOnce(&mut Self) -> Result<T>) -> Result<Option<T>> {

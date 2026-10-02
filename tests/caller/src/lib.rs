@@ -1,6 +1,5 @@
 //! Test fixture: forwards its instruction to the Mandate program, so the
-//! tests can run a payment `Open` at stack height 2, as a merchant's own
-//! program would.
+//! tests can run a `Pull` at stack height 2, as a merchant's own program would.
 #![cfg_attr(not(target_os = "solana"), allow(dead_code, unused_imports))]
 
 use pinocchio::{
@@ -18,9 +17,8 @@ program_entrypoint!(process_instruction);
 no_allocator!();
 default_panic_handler!();
 
-/// An `Open` with one pull: nine fixed accounts, two token accounts, the mint
-/// and the token program.
-const ACCOUNTS: usize = 13;
+/// A `Pull` without a price.
+const ACCOUNTS: usize = 8;
 
 fn process_instruction(_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
     if accounts.len() != ACCOUNTS {

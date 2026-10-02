@@ -23,9 +23,9 @@ Try it:
 
 | Who | Does | With |
 |---|---|---|
-| Reader | Approves "at most $8, refilling over 30 days, only to Fathom, for a year" | One signature. The first time only, one SPL `Approve` turns Mandates on for USDC |
-| Fathom's server | Checks the approval matches the plan, charges the first month, then every 30 days | one `Open` with its own key, plus `CreateMandate` the first time if the reader signed; the program refuses anything the reader didn't approve |
-| Reader | Cancels | `RevokeMandate`; the server sees it on chain |
+| Reader | Approves "Fathom may take at most $8 every 30 days" | One signature. The first time only, one SPL `Approve` turns Mandates on for USDC |
+| Fathom's server | Checks the approval matches the plan, charges the first month, then every 30 days | one `Pull` with its own key, plus `Create` the first time if the reader signed; the program refuses anything the reader didn't approve |
+| Reader | Cancels | `Close`; the server sees it on chain |
 
 The server keeps the member list, as any business does, but it is not the authority: it
 cannot charge more, more often, or to another account, and it learns of a cancellation

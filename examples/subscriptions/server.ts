@@ -1,14 +1,13 @@
 // Fathom's backend, as a publisher would run it: it holds the merchant key,
 // keeps the member list, charges each member when their period is over, and
-// serves reports to paying members only. Every charge is one Open the
+// serves reports to paying members only. Every charge is one Pull the
 // Mandate program decides; the server cannot take more than a member approved.
 import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { decode, fetchEpoch, fetchMandate, getCreateMandateInstruction, getOpenInstruction, loadMandate, mandateError } from '@mandate/sdk';
+import { decode, fetchMandate, getCreateInstruction, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
 import {
-    AccountRole,
     address,
     type Address,
     appendTransactionMessageInstructions,
@@ -88,17 +87,16 @@ export function fathom(): Plugin {
         return { signer, usdc };
     })();
 
-    /** The approval must be exactly the plan: its price, its period, paid only to Fathom. */
+    /** The approval must be exactly the plan: its price, its period, spendable only by Fathom. */
     async function check(member: Pick<Member, 'address' | 'plan' | 'terms'>) {
-        const { usdc } = await ready;
+        const { signer } = await ready;
         const plan = PLANS.find((p) => p.id === member.plan);
         const t = decode(member.terms);
-        const [take] = t.takes;
-        const period = typeof take.refill === 'object' ? take.refill.over.period : 0;
-        if (!plan || t.authority !== member.address || t.takes.length !== 1 || t.requires.length) return 'This approval is not for a Fathom plan';
-        if (take.mint !== USDC || BigInt(take.max) !== plan.price || period !== plan.period) return 'This approval does not match the plan';
-        const { signer } = await ready;
-        if (t.executor !== signer.address || take.to.length !== 1 || take.to[0] !== usdc) return 'This approval does not pay Fathom';
+        const [limit] = t.limits;
+        const period = typeof limit.per === 'object' ? limit.per.every : 0;
+        if (!plan || t.authority !== member.address || t.limits.length !== 1 || t.price) return 'This approval is not for a Fathom plan';
+        if (limit.mint !== USDC || BigInt(limit.max) !== plan.price || period !== plan.period) return 'This approval does not match the plan';
+        if (t.spender !== signer.address) return 'This approval does not name Fathom as its spender';
         return null;
     }
 
@@ -106,27 +104,13 @@ export function fathom(): Plugin {
     async function charge(member: Member) {
         const { signer, usdc } = await ready;
         const plan = PLANS.find((p) => p.id === member.plan)!;
-        const from = decode(member.terms).takes[0].from;
+        const from = decode(member.terms).limits[0].from;
         // A signed approval goes on chain with the first charge; after that it is a mandate like any other
         const create =
-            member.signature && !(await fetchMandate(rpc, member.terms))
-                ? [await getCreateMandateInstruction({ mints: [USDC], payer: signer, signature: member.signature, terms: member.terms })]
+            member.signature && !(await fetchMandate(rpc, member.terms, await clock()))
+                ? [await getCreateInstruction({ mints: [USDC], payer: signer, signature: member.signature, terms: member.terms })]
                 : [];
-        const instructions = [
-            ...create,
-            await getOpenInstruction({
-                accounts: [
-                    { address: from, role: AccountRole.WRITABLE },
-                    { address: usdc, role: AccountRole.WRITABLE },
-                    { address: USDC, role: AccountRole.READONLY },
-                    { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-                ],
-                executor: signer,
-                payer: signer,
-                pulls: [{ amount: plan.price, from, to: usdc }],
-                terms: member.terms,
-            }),
-        ];
+        const instructions = [...create, await getPullInstruction({ amount: plan.price, from, spender: signer, terms: member.terms, to: usdc })];
         const { value: blockhash } = await rpc.getLatestBlockhash().send();
         const tx = await signTransactionMessageWithSigners(
             pipe(
@@ -154,10 +138,10 @@ export function fathom(): Plugin {
 
     /** Whether the member withdrew the approval on chain: the chain, not our database, is the record. */
     async function withdrawn(member: Member) {
-        const mandate = await fetchMandate(rpc, member.terms);
-        // A signed approval is not on chain before its first charge
-        if (!mandate) return false;
-        return mandate.revoked || (await fetchEpoch(rpc, member.address)) !== decode(member.terms).epoch;
+        const mandate = await fetchMandate(rpc, member.terms, await clock());
+        // A signed approval is not on chain before its first charge; one created by transaction is closed when cancelled
+        if (!mandate) return !member.signature;
+        return mandate.revoked;
     }
 
     /** Bring one member up to date: notice a cancellation, charge a period that is due. */

@@ -6,13 +6,13 @@ export const SolanaSignMandate = 'solana:signMandate';
 
 /**
  * `solana:signMandate` is a feature that may be implemented by a {@link "@wallet-standard/base".Wallet}
- * to allow a dapp to request the wallet to sign Mandates: outcome-bound approvals the Mandate program
+ * to allow a dapp to request the wallet to sign Mandates: spending permissions the Mandate program
  * enforces on chain.
  *
  * The dapp sends the canonical terms, never text. The wallet decodes and validates them, reads each
- * mint's decimals from its own RPC, renders the canonical text itself and shows it, worst case first.
- * Terms with no expiry (`until revoked`) need a separate, explicit opt-in from the user, beyond the
- * ordinary confirmation. It then signs that text as an Offchain Message v1, so the output is exactly what
+ * mint's decimals from its own RPC, renders the canonical text itself and shows it. It refuses terms
+ * with no expiry (`until revoked`): the program accepts a signature only for terms that expire.
+ * It then signs that text as an Offchain Message v1, so the output is exactly what
  * `solana:signOffchainMessage` would return for the same text, and what the program verifies.
  */
 export type SolanaSignMandateFeature = {

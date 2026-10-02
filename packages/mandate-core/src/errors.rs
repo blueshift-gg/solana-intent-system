@@ -15,10 +15,8 @@ pub enum MandateError {
     InvalidTag,
     /// The account is not the PDA for its seeds
     InvalidSeeds,
-    /// The account to create already holds data
+    /// The mandate exists already: created, or revoked and not yet expired
     AlreadyInitialized,
-    /// An account the terms or pulls reference was not supplied
-    MissingAccount,
 
     /// The terms bytes are not a canonical encoding
     MalformedTerms,
@@ -26,10 +24,12 @@ pub enum MandateError {
     InvalidTerms,
     /// The terms are for another cluster
     WrongCluster,
-    /// The signer is not the mandate's authority, nor an executor allowed to revoke it
+    /// The signer is not the mandate's authority
     InvalidAuthority,
     /// The signature does not cover the rendered terms
     InvalidSignature,
+    /// A signature can only create a mandate that expires
+    ExpiryRequired,
     /// A timestamp outside years 1970–9999 cannot be rendered
     Unrenderable,
 
@@ -37,36 +37,25 @@ pub enum MandateError {
     NotYetValid,
     /// The mandate's window has closed
     Expired,
-    /// The signer is not the mandate's executor
-    InvalidExecutor,
-    /// The mandate was revoked or its epoch bumped
+    /// The signer is not the mandate's spender
+    InvalidSpender,
+    /// The mandate was revoked
     Revoked,
-    /// The mandate ran once already, or its lifetime limits are spent
-    AlreadyUsed,
-    /// The mandate's terms could still run: not expired, and the epoch has not moved
+    /// Only the authority or the spender may close a mandate before it expires
     NotClosable,
     /// The account is not the one that paid the rent being refunded
     InvalidPayer,
 
-    /// An exchange's Open and its Close must be top-level instructions
-    NotTopLevel,
-    /// The transaction does not hold exactly one Close for this session
-    InvalidSession,
-    /// The session watches too many token accounts
-    SessionFull,
-    /// A payment's destination could count toward another mandate's
-    /// requirement, so payments and sessions never share a transaction
-    PaymentInSession,
-    /// A pull does not come from a take of this mandate, or goes somewhere its take does not allow
+    /// No limit of the mandate covers the account pulled from
     InvalidPull,
-    /// A pull exceeds a take's limit
-    BudgetExceeded,
-    /// A target is not a token account of the stated mint and owner
+    /// The pull exceeds a limit
+    LimitExceeded,
+    /// A token account or mint is not the one the terms name, or not the authority's
     InvalidTarget,
-    /// A bound or limit overflowed
+    /// An amount overflowed
     Overflow,
-    /// An outcome the mandates require does not hold at Close
-    OutcomeNotMet,
+    /// The authority received less than the price requires
+    PriceNotPaid,
     /// Only the engine PDA may invoke the event instruction
     InvalidEventAuthority,
 }
@@ -74,7 +63,7 @@ pub enum MandateError {
 impl MandateError {
     /// Every error in code order, so clients can name a code: `ALL[code]`.
     /// A new variant goes here too; the test below checks the order.
-    pub const ALL: [MandateError; 31] = [
+    pub const ALL: [MandateError; 26] = [
         MandateError::NotSigner,
         MandateError::NotMutable,
         MandateError::InvalidAccountOwner,
@@ -82,29 +71,24 @@ impl MandateError {
         MandateError::InvalidTag,
         MandateError::InvalidSeeds,
         MandateError::AlreadyInitialized,
-        MandateError::MissingAccount,
         MandateError::MalformedTerms,
         MandateError::InvalidTerms,
         MandateError::WrongCluster,
         MandateError::InvalidAuthority,
         MandateError::InvalidSignature,
+        MandateError::ExpiryRequired,
         MandateError::Unrenderable,
         MandateError::NotYetValid,
         MandateError::Expired,
-        MandateError::InvalidExecutor,
+        MandateError::InvalidSpender,
         MandateError::Revoked,
-        MandateError::AlreadyUsed,
         MandateError::NotClosable,
         MandateError::InvalidPayer,
-        MandateError::NotTopLevel,
-        MandateError::InvalidSession,
-        MandateError::SessionFull,
-        MandateError::PaymentInSession,
         MandateError::InvalidPull,
-        MandateError::BudgetExceeded,
+        MandateError::LimitExceeded,
         MandateError::InvalidTarget,
         MandateError::Overflow,
-        MandateError::OutcomeNotMet,
+        MandateError::PriceNotPaid,
         MandateError::InvalidEventAuthority,
     ];
 }

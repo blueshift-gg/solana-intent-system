@@ -11,7 +11,7 @@ use litesvm_token::{
     get_spl_account, spl_token, Approve, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
 use mandate_core::render::{envelope, render};
-use mandate_core::terms::{Bound, Refill, Require, Seq, Take, Terms};
+use mandate_core::terms::{Limit, Per, Price, Terms};
 use mandate_core::{constants::*, errors::MandateError};
 use sha2::{Digest, Sha256};
 use solana_address::Address;
@@ -27,8 +27,6 @@ pub const CALLER: Address = Address::from_str_const("Ca11er111111111111111111111
 pub const ENGINE_KEY: Address = Address::new_from_array(ENGINE);
 pub const TOKEN: Address = litesvm_token::TOKEN_ID;
 pub const SYSTEM: Address = Address::new_from_array([0; 32]);
-pub const INSTRUCTIONS: Address =
-    Address::from_str_const("Sysvar1nstructions1111111111111111111111111");
 /// 2026-09-21T14:13:20Z.
 pub const NOW: i64 = 1_790_000_000;
 pub const USDC: u64 = 1_000_000;
@@ -175,7 +173,7 @@ impl Fixture {
         |mint| match Address::new_from_array(*mint) {
             m if m == self.usdc => Ok(6),
             m if m == self.sol => Ok(9),
-            _ => Err(MandateError::MissingAccount),
+            _ => Err(MandateError::InvalidTarget),
         }
     }
 }
@@ -214,86 +212,25 @@ pub fn sign(
     SigningKey::from_bytes(&secret).sign(&message).to_bytes()
 }
 
-/// "At most `max` may leave `from`", to wherever the executor sends it.
-pub fn take<'a>(from: &'a [u8; 32], mint: &'a [u8; 32], max: u64, refill: Refill) -> Take<'a> {
-    Take {
+/// "At most `max` of `mint` may leave `from`."
+pub fn limit<'a>(from: &'a [u8; 32], mint: &'a [u8; 32], max: u64, per: Per) -> Limit<'a> {
+    Limit {
         from,
         mint,
         max,
-        refill,
-        to: &[],
+        per,
     }
 }
 
-/// "At most `max` may leave `from`, and only to `to`."
-pub fn pay<'a>(
-    from: &'a [u8; 32],
-    mint: &'a [u8; 32],
-    max: u64,
-    refill: Refill,
-    to: &'a [[u8; 32]],
-) -> Take<'a> {
-    Take {
-        to,
-        ..take(from, mint, max, refill)
-    }
-}
-
-/// "`target` must gain at least `bound`."
-pub fn gain<'a>(
-    target: &'a [u8; 32],
-    mint: &'a [u8; 32],
-    owner: &'a [u8; 32],
-    bound: Bound,
-) -> Require<'a> {
-    Require {
-        target,
-        mint,
-        owner,
-        bound,
-    }
-}
-
+/// Terms valid from `NOW`, with salt 0.
 pub fn terms<'a>(
     authority: &'a [u8; 32],
-    once: bool,
+    spender: Option<&'a [u8; 32]>,
     not_after: Option<i64>,
-    takes: &'a [Take<'a>],
-    requires: &'a [Require<'a>],
+    limits: &[Limit<'a>],
+    price: Option<Price<'a>>,
 ) -> Terms<'a> {
-    Terms {
-        cluster: CLUSTER,
-        authority,
-        executor: None,
-        not_before: NOW,
-        not_after,
-        once,
-        epoch: 0,
-        salt: 0,
-        takes: Seq::List(takes),
-        requires: Seq::List(requires),
-    }
-}
-
-/// Every Open/Close carries its extra accounts: token accounts writable,
-/// mints and the token program read-only.
-pub fn extra(writable: &[Address], readonly: &[Address]) -> Vec<AccountMeta> {
-    let w = writable.iter().map(|a| AccountMeta::new(*a, false));
-    let r = readonly
-        .iter()
-        .map(|a| AccountMeta::new_readonly(*a, false));
-    w.chain(r).collect()
-}
-
-/// `(from, to, amount)` with `from`/`to` resolved to indices into `extra`.
-fn pulls(extra: &[AccountMeta], pulls: &[(Address, Address, u64)]) -> Vec<u8> {
-    let index = |key: &Address| extra.iter().position(|m| m.pubkey == *key).unwrap() as u8;
-    let mut data = vec![pulls.len() as u8];
-    for (from, to, amount) in pulls {
-        data.extend([index(from), index(to)]);
-        data.extend(amount.to_le_bytes());
-    }
-    data
+    Terms::new(authority, spender, (NOW, not_after), 0, limits, price)
 }
 
 pub fn mandate_pda(authority: &Address, bytes: &[u8]) -> Address {
@@ -302,7 +239,7 @@ pub fn mandate_pda(authority: &Address, bytes: &[u8]) -> Address {
 
 /// Put a mandate on chain, rent from `payer`. With a `signature` over the
 /// text the authority signs nothing here; the text names `mints`.
-pub fn create_mandate(
+pub fn create(
     authority: &Address,
     payer: &Address,
     bytes: &[u8],
@@ -312,7 +249,6 @@ pub fn create_mandate(
         AccountMeta::new_readonly(*authority, signature.is_none()),
         AccountMeta::new(*payer, true),
         AccountMeta::new(mandate_pda(authority, bytes), false),
-        AccountMeta::new_readonly(pda(&[EPOCH_SEED, authority.as_ref()]), false),
         AccountMeta::new_readonly(SYSTEM, false),
         AccountMeta::new_readonly(ENGINE_KEY, false),
         AccountMeta::new_readonly(PROGRAM, false),
@@ -329,32 +265,54 @@ pub fn create_mandate(
     }
 }
 
-/// Execute a mandate; `payer` funds the session of an exchange on first use.
-pub fn open(
-    executor: &Address,
-    payer: &Address,
+/// `spender` takes `amount` from `from` into `to`. With a price it pays from
+/// `payment.0` into `payment.2`, the account the terms name, in `payment.1`.
+#[allow(clippy::too_many_arguments)]
+pub fn pull(
+    spender: &Address,
     authority: &Address,
     bytes: &[u8],
-    extra: Vec<AccountMeta>,
-    pull: &[(Address, Address, u64)],
+    (from, mint, to): (Address, Address, Address),
+    amount: u64,
+    payment: Option<(Address, Address, Address)>,
+    token_program: Address,
 ) -> Instruction {
     let mut accounts = vec![
-        AccountMeta::new_readonly(*executor, true),
-        AccountMeta::new(pda(&[SESSION_SEED, executor.as_ref()]), false),
-        AccountMeta::new(*payer, true),
+        AccountMeta::new_readonly(*spender, true),
         AccountMeta::new(mandate_pda(authority, bytes), false),
-        AccountMeta::new_readonly(pda(&[EPOCH_SEED, authority.as_ref()]), false),
-        AccountMeta::new_readonly(INSTRUCTIONS, false),
-        AccountMeta::new_readonly(SYSTEM, false),
+        AccountMeta::new(from, false),
+        AccountMeta::new_readonly(mint, false),
+        AccountMeta::new(to, false),
         AccountMeta::new_readonly(ENGINE_KEY, false),
         AccountMeta::new_readonly(PROGRAM, false),
+        AccountMeta::new_readonly(token_program, false),
     ];
-    let data = [&[20][..], &pulls(&extra, pull)].concat();
-    accounts.extend(extra);
+    if let Some((pay_from, pay_mint, pay_to)) = payment {
+        accounts.extend([
+            AccountMeta::new(pay_from, false),
+            AccountMeta::new_readonly(pay_mint, false),
+            AccountMeta::new(pay_to, false),
+        ]);
+    }
     Instruction {
         program_id: PROGRAM,
         accounts,
-        data,
+        data: [&[1][..], &amount.to_le_bytes()].concat(),
+    }
+}
+
+/// End a mandate; its rent goes to `payer`, the account that paid it.
+pub fn close(closer: &Address, authority: &Address, bytes: &[u8], payer: &Address) -> Instruction {
+    Instruction {
+        program_id: PROGRAM,
+        accounts: vec![
+            AccountMeta::new_readonly(*closer, true),
+            AccountMeta::new(mandate_pda(authority, bytes), false),
+            AccountMeta::new(*payer, false),
+            AccountMeta::new_readonly(ENGINE_KEY, false),
+            AccountMeta::new_readonly(PROGRAM, false),
+        ],
+        data: vec![2],
     }
 }
 
@@ -362,78 +320,4 @@ pub fn open(
 pub fn by_cpi(mut ix: Instruction) -> Instruction {
     ix.program_id = CALLER;
     ix
-}
-
-pub fn close(executor: &Address, targets: &[Address]) -> Instruction {
-    let mut accounts = vec![
-        AccountMeta::new_readonly(*executor, true),
-        AccountMeta::new(pda(&[SESSION_SEED, executor.as_ref()]), false),
-        AccountMeta::new_readonly(ENGINE_KEY, false),
-        AccountMeta::new_readonly(PROGRAM, false),
-    ];
-    accounts.extend(targets.iter().map(|t| AccountMeta::new_readonly(*t, false)));
-    Instruction {
-        program_id: PROGRAM,
-        accounts,
-        data: vec![21],
-    }
-}
-
-/// The executor's own leg: an ordinary `TransferChecked` it signs.
-pub fn transfer(
-    from: &Address,
-    mint: &Address,
-    to: &Address,
-    owner: &Address,
-    amount: u64,
-    decimals: u8,
-) -> Instruction {
-    spl_token::instruction::transfer_checked(&TOKEN, from, mint, to, owner, &[], amount, decimals)
-        .unwrap()
-}
-
-/// Reclaim a mandate's rent for whoever paid it, once it can never run again.
-pub fn close_mandate(mandate: &Address, payer: &Address, authority: &Address) -> Instruction {
-    Instruction {
-        program_id: PROGRAM,
-        accounts: vec![
-            AccountMeta::new(*mandate, false),
-            AccountMeta::new(*payer, false),
-            AccountMeta::new_readonly(pda(&[EPOCH_SEED, authority.as_ref()]), false),
-            AccountMeta::new_readonly(ENGINE_KEY, false),
-            AccountMeta::new_readonly(PROGRAM, false),
-        ],
-        data: vec![22],
-    }
-}
-
-/// An authority instruction: `[authority, payer, account, accounts…, system,
-/// engine, program]`. The authority pays here, and `account` is writable.
-pub fn authority_ix(
-    discriminator: u8,
-    authority: &Address,
-    account: &Address,
-    accounts: &[Address],
-    data: &[u8],
-) -> Instruction {
-    let mut metas = vec![
-        AccountMeta::new_readonly(*authority, true),
-        AccountMeta::new(*authority, true),
-        AccountMeta::new(*account, false),
-    ];
-    metas.extend(
-        accounts
-            .iter()
-            .map(|a| AccountMeta::new_readonly(*a, false)),
-    );
-    metas.extend([
-        AccountMeta::new_readonly(SYSTEM, false),
-        AccountMeta::new_readonly(ENGINE_KEY, false),
-        AccountMeta::new_readonly(PROGRAM, false),
-    ]);
-    Instruction {
-        program_id: PROGRAM,
-        accounts: metas,
-        data: [&[discriminator][..], data].concat(),
-    }
 }

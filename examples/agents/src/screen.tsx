@@ -1,8 +1,8 @@
-import { budget, decode, fetchMandate, spentAt } from '@mandate/sdk';
+import { fetchMandate } from '@mandate/sdk';
 import QRCode from 'qrcode';
 import { useEffect, useRef, useState } from 'react';
 
-import { api, DAY, every, rpc, type Shared, unb64, usd, usdcOf } from './chain.ts';
+import { api, every, rpc, type Shared, unb64, usd, usdcOf } from './chain.ts';
 
 const TOKENS = ['JUP', 'BONK', 'JTO', 'WIF', 'PYTH', 'USDC'];
 
@@ -11,9 +11,8 @@ type Status = 'waiting' | 'working' | 'capped' | 'revoked';
 
 /** What the program's refusals mean, for the room. */
 const REASONS: Record<string, { status: Status; say: string }> = {
-    BudgetExceeded: { say: 'daily budget used up', status: 'capped' },
-    InvalidExecutor: { say: 'only Inference API may collect on this approval', status: 'working' },
-    InvalidPull: { say: 'the approval only pays Inference API', status: 'working' },
+    InvalidSpender: { say: 'only Inference API may spend this approval', status: 'working' },
+    LimitExceeded: { say: 'daily budget used up', status: 'capped' },
     Revoked: { say: 'Alice revoked the budget', status: 'revoked' },
 };
 
@@ -54,9 +53,8 @@ export function Screen() {
         }
         if (s.alice) setAlice((await usdcOf(s.alice))?.amount ?? 0n);
         if (s.budget) {
-            const terms = unb64(s.budget.terms);
-            const state = await fetchMandate(rpc, terms);
-            setToday(state ? spentAt(state, DAY, s.clock, budget(decode(terms))) : 0n);
+            const mandate = await fetchMandate(rpc, unb64(s.budget.terms), s.clock);
+            setToday(mandate?.spent[0] ?? 0n);
         }
     }), []);
 

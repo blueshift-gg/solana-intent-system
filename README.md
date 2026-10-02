@@ -1,131 +1,124 @@
 # Solana Intent System
 
-A Solana program that enforces signed intents over SPL token accounts.
+A Solana program that lets a wallet owner permit someone to move its tokens, within
+limits, without giving up custody.
 
-An intent states what may leave one token account, and either where it may go or what
-must arrive in another. The owner signs it as text, or with a transaction. Anyone can
-execute it.
+A permission (the code calls it a mandate) names a spender and one or more limits on the
+owner's token accounts. It can also set a price: what the owner must receive for what is
+taken. The spender uses it with one instruction.
 
 ```text
-A payment      Open
-An exchange    Open  →  any instructions  →  Close
+Create  →  Pull, Pull, Pull …  →  Close
 ```
 
-`Open` pulls up to the stated limit as the account's SPL delegate. A payment may only go
-to the accounts the intent names, so it is one instruction and any program can call it.
-An exchange snapshots every balance it names, and `Close` fails the transaction if they
-are wrong. Funds stay in the owner's wallet until `Open`, and nothing in between is
-trusted.
+`Pull` moves tokens out of the owner's account as its SPL delegate, inside every limit.
+If there is a price, the same instruction moves the spender's payment to the owner and
+checks what arrived. Funds stay in the owner's wallet until a pull, and there is nothing
+between the two transfers to trust. Any program can call it.
 
-## What is signed
+| Use | Spender | Limits | Price |
+|---|---|---|---|
+| Subscription | the merchant | 8 USDC every 30 days | none |
+| Agent budget | the agent's key | 5 per use, 12 a day, 100 in total | none |
+| One payment signed in advance | the payee | 100 in total, with an expiry | none |
+| Limit order, filled in parts | anyone | 100 USDC in total | at least 0.005 SOL per USDC |
+| Dutch auction | anyone | 100 USDC in total | a price that falls over five minutes |
+| DCA | anyone | 10 USDC every day | at least 0.005 SOL per USDC |
+
+## Terms
+
+```text
+Terms { authority, spender: key | anyone, not_before, not_after?, salt, limits, price? }
+Limit { from, mint, max, per: total | every(seconds) | use }
+Price { to, mint, num, den, decay?: (t0, t1, num) }
+```
+
+A limit is "at most `max` of `mint` may leave `from`", counted over the life of the
+permission, over fixed windows that start at `not_before`, or over a single pull. Limits
+on one account stack: a pull must fit every one of them. What is unused in a window does
+not carry over.
+
+A price is "for every `den` taken, at least `num` of `mint` arrives in `to`", an account
+of the owner. With a decay the rate moves in a straight line between two times.
+
+Terms are valid only if they bind someone: a named spender, or a price the owner is
+paid. A per-use limit alone bounds nothing across pulls, so it needs a limit beside it
+that persists. The `salt` tells apart permissions whose terms are otherwise identical.
+
+## Two ways to consent
+
+The owner signs the `Create` transaction, or signs this text and lets anyone bring the
+signature:
 
 ```text
 Solana Mandate v1
 cluster: localnet
 engine: Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A
 authority: A9XwnWUxXn1HH1MPzxe5MqfYaKvEHtdQMCoDd72QjPLN
-[0] MAY PAY: at most 8.000000 of mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v from 6NSx1jcpyqzHDFHwC7RXm4LZy53gNsMZWpV3P8vr8k4M to FAUD3SfhKYyynnZsS8pKVgZ9ea5VQohFqpaxKpAwzEGA, refilling over 30d
-EXECUTOR: GNxM82DJMja5ux5extFCEjbQ5C88hvcG7fvsiSCQumgs
-VALID: from 2026-10-01T08:16:00Z until revoked
-REPLAY: any number of times
-EPOCH: 0
+SPENDER: anyone
+MAY TAKE: at most 100.000000 of mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v from 6NSx1jcpyqzHDFHwC7RXm4LZy53gNsMZWpV3P8vr8k4M in total
+PRICE: at least 0.005200000 of mint So11111111111111111111111111111111111111112 to FAUD3SfhKYyynnZsS8pKVgZ9ea5VQohFqpaxKpAwzEGA for every 1.000000 taken, moving to 0.005000000 from 2026-10-01T08:16:00Z to 2026-10-01T08:21:00Z
+VALID: from 2026-10-01T08:16:00Z until 2026-10-01T09:16:00Z
 SALT: 8970456561443998011
 ```
 
-This is a subscription: 8 USDC, refilling over 30 days, collected only by one key and
-only into one account, until revoked. The text is an Offchain Message v1. The collector
-brings the signature and the terms, 213 bytes of binary; the program renders them back to this text, verifies
-Ed25519 over it in-program, and stores the terms. Every later collection is a single
-instruction with no signature in it. The text is the only thing a wallet has to show,
-and a byte of the terms cannot change without changing it
+The text is an Offchain Message v1. `Create` takes the terms as binary, renders them
+back to this text, and verifies Ed25519 over it in-program, once. After that a signed
+permission and one created by transaction are the same account. The text is all a wallet
+has to show, and a byte of the terms cannot change without changing it
 (`every_byte_of_the_terms_is_visible_in_the_text`).
 
-## Terms
-
-```text
-Terms   { authority, executor: any | key, not_before, not_after, once, epoch, salt, takes, requires }
-Take    { from, mint, max, refill: never | over(period) | each use, to: any | accounts }
-Require { target, mint, owner, bound }
-Bound   = const | linear(t0, v0, t1, v1) | ratio(of, num, den)
-```
-
-A take is a spending limit on one of the owner's token accounts, and the only thing that
-permits a pull. A requirement is an amount that must arrive in a token account between
-`Open` and `Close`.
-
-| Refill | The limit applies |
-|---|---|
-| `never` | in total, across every execution |
-| `over` | to a budget that refills linearly over `period` seconds |
-| `each use` | to a single execution |
-
-Takes on one account stack, so `100 a day`, `10 per use` and `1,000 in total` are three
-lines that all hold. With `once`, the intent runs a single time. A per-use limit alone
-bounds nothing across executions, so it is only valid next to one that persists, or
-with `once`.
-
-Every intent binds someone: the executor, the destination, or what must come back.
-Terms that leave all three open would pay whoever holds the signature, and are invalid.
-The `salt` tells apart intents whose terms are otherwise identical, so the same plan
-can be approved again after a revocation.
-
-Requirements are summed per account across every intent in the transaction, so one
-deposit cannot satisfy two intents and two intents can settle against each other.
+A signature can only stand behind terms that expire. The expiry can be far out, so a
+signed permission also does the job of a durable nonce for token movements: sign now,
+and the spender lands it any time before the date.
 
 ## Instructions
 
 | # | Instruction | Signer | |
 |---|---|---|---|
-| 0 | `CreateMandate` | authority, or anyone holding its signature | put an intent on chain |
-| 1 | `RevokeMandate` | authority, or the intent's executor | revoke one intent; the authority also one that is only signed |
-| 2 | `BumpEpoch` | authority | revoke every intent |
-| 20 | `Open` | executor | check, pull, and for an exchange snapshot |
-| 21 | `Close` | executor | check an exchange's outcomes, end the session |
-| 22 | `CloseMandate` | anyone | return the rent of an intent that has expired or whose epoch has moved |
+| 0 | `Create` | the owner, or anyone holding its signature | put a permission on chain |
+| 1 | `Pull` | the spender | take tokens within the limits, and pay the price if there is one |
+| 2 | `Close` | the owner or the spender; anyone after the expiry | end it and return the rent |
 
-Whoever pays an account's rent is always a separate account from whoever signs, and gets
-it back when the account closes.
+There is one account type, the permission, at a PDA of the owner and the hash of the
+terms. It records who paid its rent, which is always a separate account from whoever
+signs, and `Close` pays it back.
 
-An intent carries its owner's epoch and stops working when the epoch changes. The epoch
-is zero until the first `BumpEpoch`, and after that a value derived from the latest slot
-hash. It is not a counter, so terms cannot be signed in advance for an epoch still to
-come.
-
-An exchange's `Open` and `Close` must be top-level. The first `Open` reads the
-instructions sysvar and requires exactly one `Close` after it. A payment has no `Close`
-and may be called by another program; it cannot share a transaction with an exchange.
-
-An intent's account is its own tombstone. Used up or revoked, it stays until the intent
-expires or the owner bumps its epoch, so no signature for the same terms can create it
-again. That holds its rent until then, which is one more reason to sign an expiry.
+A permission that never expires closes at once. One that expires may have a signature
+behind it, so closing it early only marks it revoked; it stays until its expiry, when
+anyone can close it and the rent returns. A signature can therefore never bring back
+something that was revoked.
 
 ## Cost
 
-LiteSVM, whole transaction:
+One run each on a Surfpool mainnet fork, whole transaction:
 
 | | CU |
 |---|---|
-| Payment, `Open` | 5.5k |
-| Payment, `Open` called by another program | 8.2k |
-| Signed payment, first time: `CreateMandate` + `Open` | 72k to 80k |
-| Exchange between two intents on chain, `Open` + `Open` + `Close` | 19k to 25k |
-| Signed swap: `CreateMandate`, `Open`, the solver's transfer, `Close` | 92k to 108k |
+| `Pull` | 4.5k |
+| `Pull` with a price | 6.1k |
+| `Create` by transaction | 6.0k |
+| `Create` by signature, with the first `Pull` | 74k to 80k |
+| `Close` | 2.3k |
 
-The signature is verified once, with SHA-512 and Ed25519 in-program. The ranges are PDA
-bump search, which every account creation pays: the intent's account, and an executor's
-session the first time it settles an exchange.
+The signature costs SHA-512 and Ed25519 in-program, once. `Create` also pays a PDA bump
+search, which varies by a few thousand.
 
 ## Limits
 
 - Not audited, and its invariants are not model-checked.
 - The program is upgradeable and is the delegate of every account that enables it.
-- A token account has one delegate. Any other `Approve` on it disables its intents.
+- A token account has one delegate. Any other `Approve` on it disables its permissions.
 - Token accounts only. Native SOL has to be wrapped.
 - Enabling a token account is an SPL `Approve`, which is a transaction. Its amount caps
-  what every intent on the account can pull in total; the SDK's `getEnableInstruction`
-  takes it as an option and approves without a cap when it is left out.
+  what every permission on the account can pull in total; the SDK's
+  `getEnableInstruction` takes it as an option and approves without a cap when it is
+  left out.
+- A spender that fills a priced permission must already hold what it pays.
+- A price pays one token into one account of the owner.
 - Token-2022 transfer hooks are not forwarded. A transfer fee comes out of what the
-  destination receives, never out of the payer beyond the limit.
+  spender receives, never out of the owner beyond the limit; a price paid in a
+  fee-bearing token is refused unless the owner receives all of it.
 - No wallet implements `solana:signMandate`. Signing falls back to an offchain message.
 
 ## Build
@@ -145,10 +138,9 @@ npm run dev:subscriptions    # examples/subscriptions
 | Path | Holds |
 |---|---|
 | [`program`](program) | The engine |
-| [`packages/mandate-core`](packages/mandate-core) | Terms, validity rules, the canonical text and account layouts, shared by the program and every client |
+| [`packages/mandate-core`](packages/mandate-core) | Terms, validity rules, the canonical text and the account layout, shared by the program and every client |
 | [`packages/sdk`](packages/sdk) | `@solana/kit` builders plus `mandate-core` compiled to WebAssembly |
 | [`packages/wallet-standard`](packages/wallet-standard) | `solana:signMandate`, the one feature a wallet adds |
 | [`examples`](examples) | The agent demo and the subscription site |
 | [`tests`](tests) | LiteSVM flows, a randomized check of the limits against a reference model, and the canonical-text tests |
 
-The code calls an intent a mandate.

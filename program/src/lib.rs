@@ -13,18 +13,17 @@ program_entrypoint!(process_instruction);
 no_allocator!();
 default_panic_handler!();
 
-pub mod authority;
-pub use authority::*;
-
-pub mod executor;
-pub use executor::*;
-
+pub mod close;
+pub mod create;
 pub mod events;
 pub mod helpers;
-pub mod session;
+pub mod pull;
 pub mod state;
 
+pub use close::Close;
+pub use create::Create;
 pub use mandate_core::{constants, errors, ID};
+pub use pull::Pull;
 
 fn process_instruction(
     _program_id: &Pubkey,
@@ -32,19 +31,10 @@ fn process_instruction(
     instruction_data: &[u8],
 ) -> ProgramResult {
     match instruction_data.split_first() {
-        // Executor Instructions - Discriminators from 20. Open runs on every pull.
-        Some((Open::DISCRIMINATOR, data)) => Open::try_from((data, accounts))?.process(),
+        // Pull runs on every payment, so it comes first
+        Some((Pull::DISCRIMINATOR, data)) => Pull::try_from((data, accounts))?.process(),
+        Some((Create::DISCRIMINATOR, data)) => Create::try_from((data, accounts))?.process(),
         Some((Close::DISCRIMINATOR, _)) => Close::try_from(accounts)?.process(),
-        Some((CloseMandate::DISCRIMINATOR, _)) => CloseMandate::try_from(accounts)?.process(),
-
-        // Authority Instructions - Discriminators from 0
-        Some((CreateMandate::DISCRIMINATOR, data)) => {
-            CreateMandate::try_from((data, accounts))?.process()
-        }
-        Some((RevokeMandate::DISCRIMINATOR, data)) => {
-            RevokeMandate::try_from((data, accounts))?.process()
-        }
-        Some((BumpEpoch::DISCRIMINATOR, _)) => BumpEpoch::try_from(accounts)?.process(),
 
         // Self-CPI EmitEvent - Discriminator 255
         Some((&constants::EVENT_DISCRIMINATOR, _)) => events::emit_event(accounts),

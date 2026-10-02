@@ -86,17 +86,15 @@ function ask(title: string, rows: [string, string][], details: string, mustAckno
 async function describe(terms: Uint8Array) {
     const t = decode(terms);
     const decimals: Record<string, number> = {};
-    for (const a of [...t.takes, ...t.requires]) decimals[a.mint] ??= (await fetchMint(rpc, a.mint)).data.decimals;
+    for (const mint of [...t.limits.map((l) => l.mint), ...(t.price ? [t.price.mint] : [])]) decimals[mint] ??= (await fetchMint(rpc, mint)).data.decimals;
     const token = (mint: Address) => TOKENS[mint] ?? short(mint);
     const rows: [string, string][] = [];
-    for (const a of t.takes) {
-        const refill = typeof a.refill === 'object' ? `, refilling over ${span(a.refill.over.period)}` : a.refill === 'never' ? ' in total' : ' per use';
-        const to = a.to.length ? ` to ${a.to.map(short).join(' or ')}` : '';
-        rows.push([a.to.length ? 'Can pay' : 'Can take', `Up to ${amount(a.max, decimals[a.mint])} ${token(a.mint)}${to}${refill}`]);
+    for (const l of t.limits) {
+        const per = typeof l.per === 'object' ? ` every ${span(l.per.every)}` : l.per === 'total' ? ' in total' : ' per use';
+        rows.push(['Can take', `Up to ${amount(l.max, decimals[l.mint])} ${token(l.mint)}${per}`]);
     }
-    for (const a of t.requires) rows.push(['Only if', `${short(a.owner)} receives what the text below states`]);
-    if (!t.requires.length && t.takes.some((a) => !a.to.length)) rows.push(['In return', 'Nothing is guaranteed']);
-    rows.push(['Who can collect', t.executor ? short(t.executor) : 'Anyone, but only as stated above']);
+    if (t.price) rows.push(['Only if', `You receive ${token(t.price.mint)} at the price in the text below`]);
+    rows.push(['Who can take it', t.spender ? short(t.spender) : 'Anyone who pays the price']);
     rows.push(['Ends', t.notAfter ? date(t.notAfter) : 'Never, until you revoke it']);
     return { decimals, never: !t.notAfter, rows, text: text(terms, decimals) };
 }
@@ -120,10 +118,8 @@ async function summarize(transaction: Uint8Array) {
             const approval = await describe(new Uint8Array(data.slice(3, 3 + data[1] + data[2] * 256)));
             rows.push(['Approve', 'On chain, with this transaction'], ...approval.rows);
             details += approval.text;
-        } else if (program === MANDATE_PROGRAM_ADDRESS && [1, 2].includes(data[0])) {
-            rows.push(['Cancel', data[0] === 2 ? 'Every approval you have given' : 'One approval. It can never be used again']);
-        } else if (program === MANDATE_PROGRAM_ADDRESS && data[0] === 22) {
-            rows.push(['Close', 'A finished approval. Its rent goes back to whoever paid it']);
+        } else if (program === MANDATE_PROGRAM_ADDRESS && data[0] === 2) {
+            rows.push(['Cancel', 'One approval. It can never be used again, and its rent goes back to whoever paid it']);
         } else {
             rows.push(['Run', `Program ${short(program)}`]);
         }
@@ -156,8 +152,9 @@ const wallet = {
                         const bytes = new Uint8Array(terms);
                         const approval = await describe(bytes);
                         if (decode(bytes).authority !== signer.address) throw new Error('This approval is for another account');
-                        // An approval with no expiry needs its own opt-in
-                        await ask('Approve a spending limit', approval.rows, approval.text, approval.never ? 'I understand this approval never expires' : undefined);
+                        // The program accepts a signature only for an approval that expires
+                        if (approval.never) throw new Error('An approval that never expires cannot be signed. Approve it with a transaction.');
+                        await ask('Approve a spending limit', approval.rows, approval.text);
                         const signedOffchainMessage = message(bytes, approval.decimals);
                         return { signature: await signBytes(signer.keyPair.privateKey, signedOffchainMessage), signatureType: 'ed25519', signedOffchainMessage };
                     }),

@@ -10,9 +10,8 @@ import os from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { decode, fetchMandate, getCreateMandateInstruction, getOpenInstruction, loadMandate, mandateError } from '@mandate/sdk';
+import { decode, fetchMandate, getCreateInstruction, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
 import {
-    AccountRole,
     address,
     type Address,
     appendTransactionMessageInstructions,
@@ -71,25 +70,13 @@ let lastBlockhash = '';
 
 /** Settle: pull `amount` from the payer to `to` under the signed budget. The program decides. */
 async function settle(executor: Party, budget: Budget, to: Address, amount: bigint) {
-    const from = decode(budget.terms).takes[0].from;
-    // The first settlement puts the signed budget on chain; every later one is a single Open
-    const create = (await fetchMandate(rpc, budget.terms))
+    const from = decode(budget.terms).limits[0].from;
+    // The first settlement puts the signed budget on chain; every later one is a single Pull
+    const now = Number((await fetchSysvarClock(rpc)).unixTimestamp);
+    const create = (await fetchMandate(rpc, budget.terms, now))
         ? []
-        : [await getCreateMandateInstruction({ mints: [USDC], payer: executor.signer, signature: budget.signature, terms: budget.terms })];
-    const instructions = [
-        ...create,
-        await getOpenInstruction({
-            accounts: [
-                ...[...new Set([from, to])].map((a) => ({ address: a, role: AccountRole.WRITABLE })),
-                { address: USDC, role: AccountRole.READONLY },
-                { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-            ],
-            executor: executor.signer,
-            payer: executor.signer,
-            pulls: [{ amount, from, to }],
-            terms: budget.terms,
-        }),
-    ];
+        : [await getCreateInstruction({ mints: [USDC], payer: executor.signer, signature: budget.signature, terms: budget.terms })];
+    const instructions = [...create, await getPullInstruction({ amount, from, spender: executor.signer, terms: budget.terms, to })];
     // Each settlement must be a new transaction: wait for a fresh blockhash
     let { value: blockhash } = await rpc.getLatestBlockhash().send();
     while (blockhash.blockhash === lastBlockhash) {
@@ -184,7 +171,7 @@ export function paidApi(): Plugin {
                             // Verify: the budget must pay this API, then let the program settle it
                             const payment = JSON.parse(Buffer.from(header, 'base64').toString());
                             const budget = { signature: bytes(payment.signature), terms: bytes(payment.terms) };
-                            if (decode(budget.terms).takes[0].to.join() !== provider.usdc) return reply(res, 402, { ...requirement, error: 'This budget does not pay this API' });
+                            if (decode(budget.terms).spender !== provider.signer.address) return reply(res, 402, { ...requirement, error: 'This budget does not name this API as its spender' });
                             const settled = await settle(provider, budget, provider.usdc, PRICE);
                             if (!settled.ok) return reply(res, 402, { ...requirement, error: settled.reason });
 

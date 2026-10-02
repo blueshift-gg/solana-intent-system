@@ -1,13 +1,13 @@
 //! Canonical text: what the authority sees and signs.
 //!
-//! Deterministic, printable ASCII only, worst case first. The program renders
+//! Deterministic and printable ASCII only. The program renders
 //! straight into the signature hasher; clients render into a buffer. Both run
 //! this code, so what is shown is what is verified.
 
 use crate::{
     constants::{CLUSTER, MAX_TIME},
     errors::MandateError,
-    terms::{Bound, Refill, Require, Terms},
+    terms::{Per, Terms},
     Sink, ID,
 };
 use pinocchio::pubkey::Pubkey;
@@ -39,49 +39,49 @@ pub fn render(
     t.key(&ID);
     t.s("\nauthority: ");
     t.key(terms.authority);
-
-    let mut index = 0;
-    let mut anywhere = false;
-    for take in terms.takes.iter() {
-        t.line(&mut index);
-        t.s(if take.to.is_empty() {
-            "MAY TAKE: at most "
-        } else {
-            "MAY PAY: at most "
-        });
-        t.amount(take.max as u128, (t.decimals)(take.mint)?);
-        t.s(" of mint ");
-        t.key(take.mint);
-        t.s(" from ");
-        t.key(take.from);
-        for (i, to) in take.to.iter().enumerate() {
-            t.s(if i == 0 { " to " } else { " or " });
-            t.key(to);
-        }
-        anywhere |= take.to.is_empty();
-        match take.refill {
-            Refill::Never => t.s(" in total"),
-            Refill::Over { period } => {
-                t.s(", refilling over ");
-                t.duration(period as u64);
-            }
-            Refill::EachUse => t.s(" per use"),
-        }
-    }
-    for require in terms.requires.iter() {
-        t.line(&mut index);
-        t.s("REQUIRES: ");
-        t.outcome(&require, terms)?;
-    }
-    if anywhere && terms.requires.is_empty() {
-        t.s("\nREQUIRES: nothing - the executor decides where it goes");
-    }
-
-    t.s("\nEXECUTOR: ");
-    match terms.executor {
+    t.s("\nSPENDER: ");
+    match terms.spender {
         None => t.s("anyone"),
         Some(key) => t.key(key),
     }
+
+    for limit in terms.limits() {
+        t.s("\nMAY TAKE: at most ");
+        t.amount(limit.max, (t.decimals)(limit.mint)?);
+        t.s(" of mint ");
+        t.key(limit.mint);
+        t.s(" from ");
+        t.key(limit.from);
+        match limit.per {
+            Per::Total => t.s(" in total"),
+            Per::Every(seconds) => {
+                t.s(" every ");
+                t.duration(seconds as u64);
+            }
+            Per::Use => t.s(" per use"),
+        }
+    }
+    if let Some(price) = terms.price {
+        let paid = (t.decimals)(price.mint)?;
+        t.s("\nPRICE: at least ");
+        t.amount(price.num, paid);
+        t.s(" of mint ");
+        t.key(price.mint);
+        t.s(" to ");
+        t.key(price.to);
+        t.s(" for every ");
+        t.amount(price.den, (t.decimals)(terms.limits()[0].mint)?);
+        t.s(" taken");
+        if let Some(decay) = price.decay {
+            t.s(", moving to ");
+            t.amount(decay.num, paid);
+            t.s(" from ");
+            t.time(decay.t0)?;
+            t.s(" to ");
+            t.time(decay.t1)?;
+        }
+    }
+
     t.s("\nVALID: from ");
     t.time(terms.not_before)?;
     t.s(" until ");
@@ -89,16 +89,8 @@ pub fn render(
         None => t.s("revoked"),
         Some(end) => t.time(end)?,
     }
-    t.s("\nREPLAY: ");
-    t.s(if terms.once {
-        "once"
-    } else {
-        "any number of times"
-    });
-    t.s("\nEPOCH: ");
-    t.uint(terms.epoch as u128);
     t.s("\nSALT: ");
-    t.uint(terms.salt as u128);
+    t.uint(terms.salt);
     Ok(())
 }
 
@@ -108,51 +100,6 @@ struct Text<'o, O, D> {
 }
 
 impl<O: Sink, D: Fn(&Pubkey) -> Result<u8>> Text<'_, O, D> {
-    /// `\n[i] `, the prefix of every take and requirement.
-    fn line(&mut self, index: &mut u8) {
-        self.s("\n[");
-        self.uint(*index as u128);
-        self.s("] ");
-        *index += 1;
-    }
-
-    /// `account gains at least value` for every requirement.
-    fn outcome(&mut self, a: &Require, terms: &Terms) -> Result<()> {
-        let decimals = (self.decimals)(a.mint)?;
-        self.key(a.target);
-        self.s(" (mint ");
-        self.key(a.mint);
-        self.s(", owner ");
-        self.key(a.owner);
-        self.s(") gains at least ");
-
-        match a.bound {
-            Bound::Const(v) => self.amount(v as u128, decimals),
-            Bound::Linear { t0, v0, t1, v1 } => {
-                self.amount(v0 as u128, decimals);
-                self.s(" at ");
-                self.time(t0)?;
-                self.s(" moving linearly to ");
-                self.amount(v1 as u128, decimals);
-                self.s(" at ");
-                self.time(t1)?;
-            }
-            Bound::Ratio { of, num, den } => {
-                self.amount(num as u128, decimals);
-                self.s(" for every ");
-                let source = terms
-                    .takes
-                    .get(of as usize)
-                    .ok_or(MandateError::InvalidTerms)?;
-                self.amount(den as u128, (self.decimals)(source.mint)?);
-                self.s(" taken by [");
-                self.uint(of as u128);
-                self.s("]");
-            }
-        }
-        Ok(())
-    }
-
     fn s(&mut self, s: &str) {
         self.out.put(s.as_bytes());
     }
@@ -163,13 +110,13 @@ impl<O: Sink, D: Fn(&Pubkey) -> Result<u8>> Text<'_, O, D> {
         self.out.put(&out[..len]);
     }
 
-    fn uint(&mut self, v: u128) {
+    fn uint(&mut self, v: u64) {
         let (digits, len) = digits(v);
         self.out.put(&digits[digits.len() - len..]);
     }
 
     /// `raw` with exactly `decimals` fractional digits.
-    fn amount(&mut self, raw: u128, decimals: u8) {
+    fn amount(&mut self, raw: u64, decimals: u8) {
         let (digits, len) = digits(raw);
         let digits = &digits[digits.len() - len..];
         let d = decimals as usize;
@@ -208,7 +155,7 @@ impl<O: Sink, D: Fn(&Pubkey) -> Result<u8>> Text<'_, O, D> {
             (secs / 60 % 60, 2, ":"),
             (secs % 60, 2, "Z"),
         ] {
-            let (digits, len) = digits(v as u128);
+            let (digits, len) = digits(v as u64);
             (len..width).for_each(|_| self.s("0"));
             self.out.put(&digits[digits.len() - len..]);
             self.s(sep);
@@ -228,25 +175,18 @@ impl<O: Sink, D: Fn(&Pubkey) -> Result<u8>> Text<'_, O, D> {
             (secs % 60, "s"),
         ];
         for (n, unit) in parts.into_iter().filter(|(n, _)| *n > 0) {
-            self.uint(n as u128);
+            self.uint(n);
             self.s(unit);
         }
     }
 }
 
-/// Decimal digits of `v`, right-aligned, and how many there are. Values that
-/// fit in 64 bits skip 128-bit division, which sBPF emulates slowly.
-fn digits(mut v: u128) -> ([u8; 39], usize) {
-    let mut out = [b'0'; 39];
+/// Decimal digits of `v`, right-aligned, and how many there are.
+fn digits(mut v: u64) -> ([u8; 20], usize) {
+    let mut out = [b'0'; 20];
     let mut len = 0;
-    while v > u64::MAX as u128 {
-        out[38 - len] = b'0' + (v % 10) as u8;
-        len += 1;
-        v /= 10;
-    }
-    let mut v = v as u64;
     loop {
-        out[38 - len] = b'0' + (v % 10) as u8;
+        out[19 - len] = b'0' + (v % 10) as u8;
         len += 1;
         v /= 10;
         if v == 0 {

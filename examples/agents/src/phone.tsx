@@ -1,4 +1,4 @@
-import { budget, decode, encode, ENGINE_ADDRESS, fetchEpoch, fetchMandate, getBumpEpochInstruction, getEnableInstruction, message, spentAt, subscriptionTerms } from '@mandate/sdk';
+import { encode, ENGINE_ADDRESS, fetchMandate, getCloseInstruction, getCreateInstruction, getEnableInstruction, message, subscriptionTerms } from '@mandate/sdk';
 import { createKeyPairSignerFromPrivateKeyBytes, type KeyPairSigner, signBytes } from '@solana/kit';
 import { useEffect, useState } from 'react';
 
@@ -36,11 +36,9 @@ export function Phone() {
             let spent = 0n;
             let revoked = false;
             if (mine) {
-                const terms = unb64(shared.budget!.terms);
-                const t = decode(terms);
-                const state = await fetchMandate(rpc, terms);
-                spent = state ? spentAt(state, DAY, shared.clock, budget(t)) : 0n;
-                revoked = (await fetchEpoch(rpc, me.address)) !== t.epoch;
+                const mandate = await fetchMandate(rpc, unb64(shared.budget!.terms), shared.clock);
+                spent = mandate?.spent[0] ?? 0n;
+                revoked = !!mandate?.revoked;
             }
             const enabled = !!token && token.delegate.__option === 'Some' && token.delegate.value === ENGINE_ADDRESS;
             setView({ enabled, mine, revoked, shared, spent, usdc: token?.amount ?? 0n });
@@ -62,15 +60,13 @@ export function Phone() {
         const account = await usdcAccount(me!.address);
         // Once per token: let Mandates use this USDC, $10 across every approval
         if (!view!.enabled) await send(me!, [getEnableInstruction({ account, amount: 10_000_000n, owner: me! })]);
-        // An expiry is the default for a signed approval; `until revoked` would be an explicit opt-in
+        // A signed approval must expire: this one lasts 30 days
         const start = await now();
         const terms = encode(subscriptionTerms({
             account,
             amount: BigInt(view!.shared.perDay),
             end: start + 30 * DAY,
-            epoch: await fetchEpoch(rpc, me!.address),
             merchant: view!.shared.provider,
-            merchantAccount: view!.shared.providerUsdc,
             mint: USDC,
             period: DAY,
             start,
@@ -81,7 +77,13 @@ export function Phone() {
         await api('/budget', { signature: b64(signature), terms: b64(terms) });
     });
 
-    const revoke = act('Revoking', async () => send(me!, [await getBumpEpochInstruction({ authority: me!, payer: me! })]));
+    const revoke = act('Revoking', async () => {
+        const terms = unb64(view!.shared.budget!.terms);
+        const mandate = await fetchMandate(rpc, terms, await now());
+        // A budget the API has not used yet is not on chain: put it there, then close it
+        const create = mandate ? [] : [await getCreateInstruction({ authority: me!, payer: me!, terms })];
+        await send(me!, [...create, await getCloseInstruction({ closer: me!, payer: mandate?.payer ?? me!.address, terms })]);
+    });
 
     if (!me || !view) return <main className="phone-page"><p className="quiet">Opening Alice’s wallet…</p></main>;
     const perDay = BigInt(view.shared.perDay);

@@ -10,41 +10,40 @@ import init, { decodeTerms, encodeTerms, errorName, renderText } from '../wasm/m
  */
 export type Terms = {
     authority: Address;
-    executor: Address | null;
+    /** Who may pull. `null` is anyone, which is only valid with a price. */
+    spender: Address | null;
     notBefore: number;
+    /** `null` runs until revoked. Terms that are signed, not sent as a transaction, must expire. */
     notAfter: number | null;
-    /** One execution only, whatever it takes. */
-    once: boolean;
-    /** The authority's current epoch (`fetchEpoch`). */
-    epoch: string;
     /** Tells apart mandates whose terms are otherwise identical. */
     salt: string;
-    takes: Take[];
-    requires: Require[];
+    limits: Limit[];
+    price: Price | null;
 };
 
 /**
- * At most `max` of `mint` may leave `from`, a token account of the authority.
- * `to` lists where a pull may go; empty means wherever the executor sends it.
- * Takes on one account stack: a pull must fit every one of them.
+ * At most `max` of `mint` may leave `from`, a token account of the authority:
+ * in total, in every fixed window of N seconds counted from `notBefore`, or
+ * in one pull. Limits on one account stack: a pull must fit every one of them.
  */
-export type Take = {
+export type Limit = {
     from: Address;
     mint: Address;
     max: string;
-    refill: 'never' | 'eachUse' | { over: { period: number } };
-    to: Address[];
+    per: 'total' | 'use' | { every: number };
 };
 
-/** Token account `target` (of `mint`, owned by `owner`) must gain at least `bound`. */
-export type Require = {
-    target: Address;
+/**
+ * For every `den` taken, the spender pays at least `num` of `mint` into `to`,
+ * a token account of the authority, inside the pull. With `decay` the rate
+ * moves in a straight line to `decay.num` between `t0` and `t1`.
+ */
+export type Price = {
+    to: Address;
     mint: Address;
-    owner: Address;
-    bound:
-        | { const: string }
-        | { linear: { t0: number; v0: string; t1: number; v1: string } }
-        | { ratio: { of: number; num: string; den: string } };
+    num: string;
+    den: string;
+    decay: { t0: number; t1: number; num: string } | null;
 };
 
 let loaded: Promise<unknown> | undefined;
@@ -87,8 +86,9 @@ export async function mandateId(bytes: Uint8Array): Promise<Uint8Array> {
 export const randomSalt = (): string => crypto.getRandomValues(new BigUint64Array(1))[0].toString();
 
 /**
- * A subscription: at most `amount` from the subscriber's account, refilling
- * over `period`. Only the merchant may collect, and only into its own account.
+ * A subscription: only `merchant` may take, at most `amount` in every period,
+ * from the subscriber's account. Without `end` it runs until revoked and must
+ * be created by transaction; with `end` it can be signed instead.
  */
 export function subscriptionTerms(p: {
     subscriber: Address;
@@ -96,26 +96,17 @@ export function subscriptionTerms(p: {
     mint: Address;
     amount: bigint;
     period: number;
-    /** The key that collects: the only executor, and it may revoke. */
     merchant: Address;
-    merchantAccount: Address;
     start: number;
     end?: number;
-    /** The subscriber's current epoch (`fetchEpoch`). */
-    epoch: string;
 }): Terms {
     return {
         authority: p.subscriber,
-        epoch: p.epoch,
-        executor: p.merchant,
+        limits: [{ from: p.account, max: p.amount.toString(), mint: p.mint, per: { every: p.period } }],
         notAfter: p.end ?? null,
         notBefore: p.start,
-        once: false,
-        requires: [],
+        price: null,
         salt: randomSalt(),
-        takes: [{ from: p.account, max: p.amount.toString(), mint: p.mint, refill: { over: { period: p.period } }, to: [p.merchantAccount] }],
+        spender: p.merchant,
     };
 }
-
-/** The limit of the first take of `terms`, as an amount. */
-export const budget = (terms: Terms): bigint => BigInt(terms.takes[0].max);

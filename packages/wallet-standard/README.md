@@ -40,10 +40,10 @@ Every row produces a mandate the same program enforces. Only the display differs
 - Reject when `account` is not the terms' authority.
 - Render with the Mandate canonical renderer and sign
   `"\xffsolana offchain" ‖ 0x01 ‖ 0x01 ‖ authority ‖ text`.
-- Show every `MAY TAKE` line before any `REQUIRES` line, and always show `until revoked`.
-- Sign terms that are valid `until revoked` only after a separate, explicit opt-in that says the approval never expires.
+- Show the `SPENDER`, every `MAY TAKE` line and the `PRICE` line.
+- Refuse terms that are valid `until revoked`: the program only accepts a signature for terms that expire.
 
-The enabling `Approve`, `CreateMandate` and revocations are ordinary transactions, so
+The enabling `Approve`, `Create` and `Close` are ordinary transactions, so
 they need no feature.
 
 ```sh

@@ -1,10 +1,10 @@
 import {
     encode,
     ENGINE_ADDRESS,
-    fetchEpoch,
-    getCreateMandateInstruction,
+    fetchMandate,
+    getCloseInstruction,
+    getCreateInstruction,
     getEnableInstruction,
-    getRevokeMandateInstruction,
     subscriptionTerms,
     text,
 } from '@mandate/sdk';
@@ -255,17 +255,15 @@ function Checkout({ config, plan, onConnect, close, done }: { config: Config; pl
             const enabled = token.data.delegate.__option === 'Some' && token.data.delegate.value === ENGINE_ADDRESS;
             const enable = enabled ? [] : [getEnableInstruction({ account: source, owner: signer })];
             // Best first: the wallet renders the terms; else it signs our text; else it signs a transaction.
-            // Either way the approval lasts a year: an expiry is what returns the mandate's rent
+            // A signed approval must expire, so it lasts a year; one made by transaction runs until cancelled
             const how = ([SIGN_MANDATE, SIGN_OFFCHAIN] as const).find((f) => account.features.includes(f));
             const signs = !!how;
             const start = await now();
             const terms = encode(subscriptionTerms({
                 account: source,
                 amount: BigInt(plan.price),
-                end: start + 365 * DAY,
-                epoch: await fetchEpoch(rpc, me),
+                end: signs ? start + 365 * DAY : undefined,
                 merchant: config.merchant,
-                merchantAccount: config.merchantUsdc,
                 mint: USDC,
                 period: plan.period,
                 start,
@@ -294,7 +292,7 @@ function Checkout({ config, plan, onConnect, close, done }: { config: Config; pl
             } else {
                 // Any other wallet: create the same mandate with an ordinary transaction
                 setStep('Approve the membership in your wallet…');
-                await send(signer, [...enable, await getCreateMandateInstruction({ authority: signer, payer: signer, terms })]);
+                await send(signer, [...enable, await getCreateInstruction({ authority: signer, payer: signer, terms })]);
             }
 
             setStep('Collecting your first month…');
@@ -356,8 +354,9 @@ function Account({ config, membership, plan, refresh, choose, signOut }: { confi
         setError('');
         try {
             const terms = unb64(membership.terms);
-            // The mandate stays on chain, revoked, until it expires: that is what stops it being created again
-            await send(reader.signer, [await getRevokeMandateInstruction({ payer: reader.signer, revoker: reader.signer, terms })]);
+            // The rent goes back to whoever paid it: at once if the approval never expires, else after its expiry
+            const mandate = await fetchMandate(rpc, terms, await now());
+            await send(reader.signer, [await getCloseInstruction({ closer: reader.signer, payer: mandate?.payer ?? reader.me, terms })]);
             await refresh();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));

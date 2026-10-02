@@ -1,5 +1,4 @@
 //! Account lifecycle, token views and transfers, and hashing.
-//! Checks live in `check_*` helpers; the rest only executes.
 
 use mandate_core::{constants::*, errors::MandateError};
 use pinocchio::{
@@ -11,19 +10,6 @@ use pinocchio::{
     sysvars::{rent::Rent, Sysvar},
     ProgramResult,
 };
-
-/// An exchange's Open and its Close read the instructions sysvar, which
-/// describes top-level instructions only; a CPI caller could otherwise wrap
-/// them in its own logic. A payment has no Close and skips this.
-#[inline(always)]
-pub fn check_top_level() -> ProgramResult {
-    #[cfg(target_os = "solana")]
-    // SAFETY: the syscall takes no arguments.
-    if unsafe { pinocchio::syscalls::sol_get_stack_height() } != 1 {
-        return Err(MandateError::NotTopLevel.into());
-    }
-    Ok(())
-}
 
 /// `account` must be the PDA for `seeds`; returns its bump.
 #[inline(always)]
@@ -98,18 +84,6 @@ pub fn close(account: &AccountInfo, to: &AccountInfo) -> ProgramResult {
     account.close()
 }
 
-/// The supplied account with this key.
-#[inline(always)]
-pub fn find<'a>(
-    accounts: &'a [AccountInfo],
-    key: &Pubkey,
-) -> Result<&'a AccountInfo, MandateError> {
-    accounts
-        .iter()
-        .find(|a| a.key().eq(key))
-        .ok_or(MandateError::MissingAccount)
-}
-
 /// Token account or mint data, by the base-layout length or Token-2022's
 /// account-type byte after it.
 fn token_data(account: &AccountInfo, base_len: usize, kind: u8) -> Result<&[u8], MandateError> {
@@ -124,32 +98,29 @@ fn token_data(account: &AccountInfo, base_len: usize, kind: u8) -> Result<&[u8],
     Err(MandateError::InvalidTarget)
 }
 
-/// The owner of a token account.
-pub fn token_owner(account: &AccountInfo) -> Result<&[u8; 32], MandateError> {
-    Ok(token_data(account, 165, 2)?[32..64].try_into().unwrap())
-}
-
 pub fn decimals(mint: &AccountInfo) -> Result<u8, MandateError> {
     Ok(token_data(mint, 82, 1)?[44])
 }
 
-/// The balance of token account `account`, after checking it still is what
-/// the terms name: this mint and this owner.
-pub fn balance(account: &AccountInfo, mint: &Pubkey, owner: &Pubkey) -> Result<i128, MandateError> {
+/// The balance of token account `account`, after checking it is what the
+/// terms name: this mint, and the authority's own. The engine is the delegate
+/// of many wallets, so this is what keeps a mandate to its authority's funds.
+pub fn balance(account: &AccountInfo, mint: &Pubkey, owner: &Pubkey) -> Result<u64, MandateError> {
     let data = token_data(account, 165, 2)?;
     if data[..32].ne(mint) || data[32..64].ne(owner) {
         return Err(MandateError::InvalidTarget);
     }
-    Ok(u64::from_le_bytes(data[64..72].try_into().unwrap()) as i128)
+    Ok(u64::from_le_bytes(data[64..72].try_into().unwrap()))
 }
 
-/// `TransferChecked` from a token account the engine is delegate of. The
-/// instruction layout is shared by SPL Token and Token-2022.
+/// `TransferChecked`, signed by the engine PDA when `authority` is the engine
+/// (a pull, as delegate) and by the transaction otherwise (the spender paying
+/// the price). The instruction layout is shared by SPL Token and Token-2022.
 pub fn transfer(
     from: &AccountInfo,
     mint: &AccountInfo,
     to: &AccountInfo,
-    engine: &AccountInfo,
+    authority: &AccountInfo,
     amount: u64,
 ) -> ProgramResult {
     let mut data = [12; 10];
@@ -157,6 +128,11 @@ pub fn transfer(
     data[9] = decimals(mint)?;
     let bump = [ENGINE_BUMP];
     let seeds = [Seed::from(ENGINE_SEED), Seed::from(&bump)];
+    let engine = [Signer::from(&seeds)];
+    let signers: &[Signer] = match authority.key().eq(&ENGINE) {
+        true => &engine,
+        false => &[],
+    };
     invoke_signed(
         &Instruction {
             // SAFETY: `owner` is only read here, before any CPI changes it.
@@ -165,34 +141,13 @@ pub fn transfer(
                 AccountMeta::writable(from.key()),
                 AccountMeta::readonly(mint.key()),
                 AccountMeta::writable(to.key()),
-                AccountMeta::readonly_signer(&ENGINE),
+                AccountMeta::readonly_signer(authority.key()),
             ],
             data: &data,
         },
-        &[from, mint, to, engine],
-        &[Signer::from(&seeds)],
+        &[from, mint, to, authority],
+        signers,
     )
-}
-
-/// The most recent slot hash: nobody knows it before its slot.
-#[cfg(target_os = "solana")]
-pub fn latest_slot_hash() -> Result<[u8; 32], ProgramError> {
-    let mut out = [0; 32];
-    // SlotHashes is a u64 count, then (slot: u64, hash: [u8; 32]) newest first.
-    // SAFETY: `sol_get_sysvar` reads a 32-byte id and writes exactly 32 bytes.
-    let failed = unsafe {
-        pinocchio::syscalls::sol_get_sysvar(SLOT_HASHES.as_ptr(), out.as_mut_ptr(), 16, 32)
-    };
-    if failed != 0 {
-        return Err(ProgramError::UnsupportedSysvar);
-    }
-    Ok(out)
-}
-
-/// Host builds (unit tests, clippy) have no syscall to link against.
-#[cfg(not(target_os = "solana"))]
-pub fn latest_slot_hash() -> Result<[u8; 32], ProgramError> {
-    Ok([0; 32])
 }
 
 #[cfg(target_os = "solana")]

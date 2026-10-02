@@ -30,18 +30,18 @@ No phone at hand: open `/phone` in a narrow window next to the screen.
 agent ──GET /api/analytics──▶ API: 402 { scheme: "mandate", amount, payTo }
 agent ──GET + X-PAYMENT: Alice's signed budget──▶ API
     API checks the budget pays this API, then settles on chain:
-    Open (pull $0.05, only to the API; the first one also brings Alice's signature) → 200 + data
+    Pull $0.05 (the first one also brings Alice's signature) → 200 + data
 ```
 
-- **The budget is a signed mandate** (`subscriptionTerms`: at most $1 per day, collected
-  only by the API's key and only into the API's account). Alice signs it on her phone with no transaction; the first
+- **The budget is a signed mandate** (`subscriptionTerms`: at most $1 per day, spendable
+  only by the API's key). Alice signs it on her phone with no transaction; the first
   time only, one SPL `Approve` turns Mandates on.
-- **The API cannot take more than the budget,** cannot be paid to anyone else, and
-  stops working the moment Alice bumps her epoch. The program enforces all three, not
+- **The API cannot take more than the budget,** nobody else can spend it, and it
+  stops working the moment Alice closes it. The program enforces all three, not
   the agent or the API.
 
 | File | Holds |
 |---|---|
 | `server.ts` | The paid API and Mallory's server: 402, verify, settle with `@mandate/sdk` |
 | `src/screen.tsx` | The agent loop (x402 client), live stats, QR code, prompt injection |
-| `src/phone.tsx` | Alice's wallet: fund, approve (sign the budget), revoke (`BumpEpoch`) |
+| `src/phone.tsx` | Alice's wallet: fund, approve (sign the budget), revoke (`Close`) |

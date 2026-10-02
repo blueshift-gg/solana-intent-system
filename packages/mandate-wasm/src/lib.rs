@@ -2,11 +2,10 @@
 //! text come from the same code the program runs, so no JavaScript
 //! reimplements the codec, the validity rules or the canonical text.
 //!
-//! Integers that can exceed 2^53 (amounts, bounds, the epoch, the salt) are strings.
+//! Integers that can exceed 2^53 (amounts, rates, the salt) are strings.
 
-use mandate_core::constants::CLUSTER;
 use mandate_core::render::render;
-use mandate_core::terms::{Bound, Refill, Require, Seq, Take, Terms};
+use mandate_core::terms::{Decay, Limit, Per, Price, Terms};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -15,56 +14,44 @@ use wasm_bindgen::prelude::*;
 #[serde(rename_all = "camelCase")]
 struct TermsJson {
     authority: String,
-    executor: Option<String>,
+    spender: Option<String>,
     not_before: i64,
     not_after: Option<i64>,
-    once: bool,
-    epoch: String,
     salt: String,
-    takes: Vec<TakeJson>,
-    requires: Vec<RequireJson>,
+    limits: Vec<LimitJson>,
+    price: Option<PriceJson>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct TakeJson {
+struct LimitJson {
     from: String,
     mint: String,
     max: String,
-    refill: RefillJson,
-    to: Vec<String>,
+    per: PerJson,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-enum RefillJson {
-    Never,
-    Over { period: u32 },
-    EachUse,
+enum PerJson {
+    Total,
+    Every(u32),
+    Use,
 }
 
 #[derive(Serialize, Deserialize)]
-struct RequireJson {
-    target: String,
+struct PriceJson {
+    to: String,
     mint: String,
-    owner: String,
-    bound: BoundJson,
+    num: String,
+    den: String,
+    decay: Option<DecayJson>,
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum BoundJson {
-    Const(String),
-    Linear {
-        t0: i64,
-        v0: String,
-        t1: i64,
-        v1: String,
-    },
-    Ratio {
-        of: u8,
-        num: String,
-        den: String,
-    },
+struct DecayJson {
+    t0: i64,
+    t1: i64,
+    num: String,
 }
 
 /// Canonical bytes for the terms, after the validity rules (`Terms::validate`).
@@ -72,75 +59,60 @@ enum BoundJson {
 pub fn encode_terms(json: &str) -> Result<Vec<u8>, JsError> {
     let j: TermsJson = serde_json::from_str(json)?;
     let authority = key(&j.authority)?;
-    let executor = j.executor.as_deref().map(key).transpose()?;
+    let spender = j.spender.as_deref().map(key).transpose()?;
 
-    // Own every key and number first; the core's terms borrow them.
-    let owned_takes = j
-        .takes
+    // Own every key first; the core's terms borrow them.
+    let keys = j
+        .limits
         .iter()
-        .map(|t| {
-            let to = t.to.iter().map(|k| key(k)).collect::<Result<Vec<_>, _>>()?;
-            Ok((key(&t.from)?, key(&t.mint)?, t.max.parse()?, to))
-        })
-        .collect::<Result<Vec<([u8; 32], [u8; 32], u64, Vec<[u8; 32]>)>, JsError>>()?;
-    let takes: Vec<Take> = owned_takes
+        .map(|l| Ok((key(&l.from)?, key(&l.mint)?)))
+        .collect::<Result<Vec<_>, JsError>>()?;
+    let limits = keys
         .iter()
-        .zip(&j.takes)
-        .map(|((from, mint, max, to), t)| Take {
-            from,
-            mint,
-            max: *max,
-            refill: match t.refill {
-                RefillJson::Never => Refill::Never,
-                RefillJson::Over { period } => Refill::Over { period },
-                RefillJson::EachUse => Refill::EachUse,
-            },
-            to,
-        })
-        .collect();
-    let owned_requires = j
-        .requires
-        .iter()
-        .map(|a| {
-            let bound = match &a.bound {
-                BoundJson::Const(v) => Bound::Const(v.parse()?),
-                BoundJson::Linear { t0, v0, t1, v1 } => Bound::Linear {
-                    t0: *t0,
-                    v0: v0.parse()?,
-                    t1: *t1,
-                    v1: v1.parse()?,
+        .zip(&j.limits)
+        .map(|((from, mint), l)| {
+            Ok(Limit {
+                from,
+                mint,
+                max: l.max.parse()?,
+                per: match l.per {
+                    PerJson::Total => Per::Total,
+                    PerJson::Every(seconds) => Per::Every(seconds),
+                    PerJson::Use => Per::Use,
                 },
-                BoundJson::Ratio { of, num, den } => Bound::Ratio {
-                    of: *of,
-                    num: num.parse()?,
-                    den: den.parse()?,
-                },
-            };
-            Ok((key(&a.target)?, key(&a.mint)?, key(&a.owner)?, bound))
+            })
         })
         .collect::<Result<Vec<_>, JsError>>()?;
-    let requires: Vec<Require> = owned_requires
-        .iter()
-        .map(|(target, mint, owner, bound)| Require {
-            target,
-            mint,
-            owner,
-            bound: *bound,
-        })
-        .collect();
-
-    let terms = Terms {
-        cluster: CLUSTER,
-        authority: &authority,
-        executor: executor.as_ref(),
-        not_before: j.not_before,
-        not_after: j.not_after,
-        once: j.once,
-        epoch: j.epoch.parse()?,
-        salt: j.salt.parse()?,
-        takes: Seq::List(&takes),
-        requires: Seq::List(&requires),
+    let paid = match &j.price {
+        Some(p) => Some((key(&p.to)?, key(&p.mint)?)),
+        None => None,
     };
+    let price = match (&j.price, &paid) {
+        (Some(p), Some((to, mint))) => Some(Price {
+            to,
+            mint,
+            num: p.num.parse()?,
+            den: p.den.parse()?,
+            decay: match &p.decay {
+                Some(d) => Some(Decay {
+                    t0: d.t0,
+                    t1: d.t1,
+                    num: d.num.parse()?,
+                }),
+                None => None,
+            },
+        }),
+        _ => None,
+    };
+
+    let terms = Terms::new(
+        &authority,
+        spender.as_ref(),
+        (j.not_before, j.not_after),
+        j.salt.parse()?,
+        &limits,
+        price,
+    );
     terms.validate().map_err(error)?;
     let mut bytes = Vec::new();
     terms.write(&mut bytes);
@@ -151,54 +123,38 @@ pub fn encode_terms(json: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen(js_name = decodeTerms)]
 pub fn decode_terms(bytes: &[u8]) -> Result<String, JsError> {
     let t = Terms::decode(bytes).map_err(error)?;
-    let takes = t
-        .takes
+    let limits = t
+        .limits()
         .iter()
-        .map(|a| TakeJson {
-            from: b58(a.from),
-            mint: b58(a.mint),
-            max: a.max.to_string(),
-            refill: match a.refill {
-                Refill::Never => RefillJson::Never,
-                Refill::Over { period } => RefillJson::Over { period },
-                Refill::EachUse => RefillJson::EachUse,
-            },
-            to: a.to.iter().map(b58).collect(),
-        })
-        .collect();
-    let requires = t
-        .requires
-        .iter()
-        .map(|a| RequireJson {
-            target: b58(a.target),
-            mint: b58(a.mint),
-            owner: b58(a.owner),
-            bound: match a.bound {
-                Bound::Const(v) => BoundJson::Const(v.to_string()),
-                Bound::Linear { t0, v0, t1, v1 } => BoundJson::Linear {
-                    t0,
-                    v0: v0.to_string(),
-                    t1,
-                    v1: v1.to_string(),
-                },
-                Bound::Ratio { of, num, den } => BoundJson::Ratio {
-                    of,
-                    num: num.to_string(),
-                    den: den.to_string(),
-                },
+        .map(|l| LimitJson {
+            from: b58(l.from),
+            mint: b58(l.mint),
+            max: l.max.to_string(),
+            per: match l.per {
+                Per::Total => PerJson::Total,
+                Per::Every(seconds) => PerJson::Every(seconds),
+                Per::Use => PerJson::Use,
             },
         })
         .collect();
     let json = TermsJson {
         authority: b58(t.authority),
-        executor: t.executor.map(b58),
+        spender: t.spender.map(b58),
         not_before: t.not_before,
         not_after: t.not_after,
-        once: t.once,
-        epoch: t.epoch.to_string(),
         salt: t.salt.to_string(),
-        takes,
-        requires,
+        limits,
+        price: t.price.map(|p| PriceJson {
+            to: b58(p.to),
+            mint: b58(p.mint),
+            num: p.num.to_string(),
+            den: p.den.to_string(),
+            decay: p.decay.map(|d| DecayJson {
+                t0: d.t0,
+                t1: d.t1,
+                num: d.num.to_string(),
+            }),
+        }),
     };
     Ok(serde_json::to_string(&json)?)
 }
@@ -215,7 +171,7 @@ pub fn render_text(bytes: &[u8], decimals: &str) -> Result<String, JsError> {
             decimals
                 .get(&b58(mint))
                 .copied()
-                .ok_or(mandate_core::errors::MandateError::MissingAccount)
+                .ok_or(mandate_core::errors::MandateError::InvalidTarget)
         },
         &mut out,
     )
