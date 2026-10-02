@@ -86,15 +86,15 @@ function ask(title: string, rows: [string, string][], details: string, mustAckno
 async function describe(terms: Uint8Array) {
     const t = decode(terms);
     const decimals: Record<string, number> = {};
-    for (const mint of [...t.limits.map((l) => l.mint), ...(t.price ? [t.price.mint] : [])]) decimals[mint] ??= (await fetchMint(rpc, mint)).data.decimals;
+    for (const mint of [...t.limits.map((l) => l.mint), ...(t.receive ? [t.receive.mint] : [])]) decimals[mint] ??= (await fetchMint(rpc, mint)).data.decimals;
     const token = (mint: Address) => TOKENS[mint] ?? short(mint);
     const rows: [string, string][] = [];
     for (const l of t.limits) {
         const per = typeof l.per === 'object' ? ` every ${span(l.per.every)}` : l.per === 'total' ? ' in total' : ' per use';
         rows.push(['Can take', `Up to ${amount(l.max, decimals[l.mint])} ${token(l.mint)}${per}`]);
     }
-    if (t.price) rows.push(['Only if', `You receive ${token(t.price.mint)} at the price in the text below`]);
-    rows.push(['Who can take it', t.spender ? short(t.spender) : 'Anyone who pays the price']);
+    if (t.receive) rows.push(['Only if', `You receive at least ${amount(t.receive.min, decimals[t.receive.mint])} ${token(t.receive.mint)} each time`]);
+    rows.push(['Who can take it', t.spender ? short(t.spender) : 'Anyone who delivers that']);
     rows.push(['Ends', t.notAfter ? date(t.notAfter) : 'Never, until you revoke it']);
     return { decimals, never: !t.notAfter, rows, text: text(terms, decimals) };
 }

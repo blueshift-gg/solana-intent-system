@@ -11,7 +11,7 @@ use litesvm_token::{
     get_spl_account, spl_token, Approve, CreateAssociatedTokenAccount, CreateMint, MintTo,
 };
 use mandate_core::render::{envelope, render};
-use mandate_core::terms::{Limit, Per, Price, Terms};
+use mandate_core::terms::{Limit, Per, Receive, Terms};
 use mandate_core::{constants::*, errors::MandateError};
 use sha2::{Digest, Sha256};
 use solana_address::Address;
@@ -228,9 +228,9 @@ pub fn terms<'a>(
     spender: Option<&'a [u8; 32]>,
     not_after: Option<i64>,
     limits: &[Limit<'a>],
-    price: Option<Price<'a>>,
+    receive: Option<Receive<'a>>,
 ) -> Terms<'a> {
-    Terms::new(authority, spender, (NOW, not_after), 0, limits, price)
+    Terms::new(authority, spender, (NOW, not_after), 0, limits, receive)
 }
 
 pub fn policy_pda(authority: &Address, bytes: &[u8]) -> Address {
@@ -255,7 +255,7 @@ pub fn create(authority: &Address, payer: &Address, bytes: &[u8]) -> Instruction
 
 /// `(from, mint, to)`: the token account taken from, its mint, and where the tokens go.
 pub type Take = (Address, Address, Address);
-/// `(pay_from, pay_mint, pay_to)`: the spender's account, the price's mint, the account the terms name.
+/// `(pay_from, pay_mint, pay_to)`: the spender's account, the mint the authority receives, the account the terms name.
 pub type Pay = (Address, Address, Address);
 
 fn legs((from, mint, to): Take, payment: Option<Pay>, token_program: Address) -> Vec<AccountMeta> {
@@ -277,7 +277,7 @@ fn legs((from, mint, to): Take, payment: Option<Pay>, token_program: Address) ->
     accounts
 }
 
-/// `spender` takes `amount` under a policy, paying its price if it has one.
+/// `spender` takes `amount` under a policy, paying what the authority receives if the terms say so.
 pub fn pull(
     spender: &Address,
     authority: &Address,
@@ -299,10 +299,11 @@ pub fn pull(
     }
 }
 
-/// The page of nonces for intents of `authority` that expire at `not_after`.
-pub fn nonces_pda(authority: &Address, not_after: i64) -> Address {
+/// The page that holds the nonce of an intent of `authority` with this expiry and salt.
+pub fn nonces_pda(authority: &Address, not_after: i64, salt: u64) -> Address {
     let day = not_after.div_euclid(NONCE_DAY).to_le_bytes();
-    pda(&[NONCES_SEED, authority.as_ref(), &day])
+    let page = (salt / NONCE_BITS as u64).to_le_bytes();
+    pda(&[NONCES_SEED, authority.as_ref(), &day, &page])
 }
 
 /// `spender` runs a signed intent once, taking `amount`. It pays for the page of nonces.
@@ -318,7 +319,10 @@ pub fn fill(
     let mut accounts = vec![
         AccountMeta::new_readonly(*spender, true),
         AccountMeta::new(*spender, true),
-        AccountMeta::new(nonces_pda(&authority, terms.not_after.unwrap()), false),
+        AccountMeta::new(
+            nonces_pda(&authority, terms.not_after.unwrap(), terms.salt),
+            false,
+        ),
         AccountMeta::new_readonly(SYSTEM, false),
     ];
     accounts.extend(legs(take, payment, TOKEN));
@@ -336,7 +340,7 @@ pub fn cancel(authority: &Address, not_after: i64, salt: u64) -> Instruction {
         accounts: vec![
             AccountMeta::new_readonly(*authority, true),
             AccountMeta::new(*authority, true),
-            AccountMeta::new(nonces_pda(authority, not_after), false),
+            AccountMeta::new(nonces_pda(authority, not_after, salt), false),
             AccountMeta::new_readonly(SYSTEM, false),
             AccountMeta::new_readonly(ENGINE_KEY, false),
             AccountMeta::new_readonly(PROGRAM, false),

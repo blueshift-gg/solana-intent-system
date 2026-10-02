@@ -89,14 +89,18 @@ impl Policy {
     field!(terms_len, set_terms_len, u16);
 }
 
-/// The nonces an authority's signed intents have used, for intents that
-/// expire on one day. One bit each, so intents run in any order.
+/// One page of the nonces an authority's signed intents have used, for
+/// intents that expire on one day. One bit each, so intents run in any order.
 #[repr(C)]
 pub struct Nonces {
     tag: [u8; 1],
     /// Paid the rent; refunded by `Close` once the day is over.
     pub payer: Pubkey,
+    /// The page's place, recorded when it was created at its PDA, so a fill
+    /// compares these instead of deriving the address again.
+    pub authority: Pubkey,
     day: [u8; 8],
+    page: [u8; 8],
     bits: [u8; NONCE_BITS / 8],
 }
 
@@ -105,10 +109,11 @@ account!(Nonces);
 impl Nonces {
     field!(tag, set_tag, u8);
     field!(day, set_day, i64);
+    field!(page, set_page, u64);
 
-    /// Mark `nonce` used; false if it already was.
-    pub fn take(&mut self, nonce: u64) -> bool {
-        let bit = (nonce % NONCE_BITS as u64) as usize;
+    /// Mark the nonce of `salt` used; false if it already was.
+    pub fn take(&mut self, salt: u64) -> bool {
+        let bit = (salt % NONCE_BITS as u64) as usize;
         let (byte, mask) = (&mut self.bits[bit / 8], 1 << (bit % 8));
         let fresh = *byte & mask == 0;
         *byte |= mask;

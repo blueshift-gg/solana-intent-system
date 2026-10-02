@@ -61,20 +61,18 @@ pub fn render(
             Per::Use => t.s(" per use"),
         }
     }
-    if let Some(price) = terms.price {
-        let paid = (t.decimals)(price.mint)?;
-        t.s("\nPRICE: at least ");
-        t.amount(price.num, paid);
+    if let Some(receive) = terms.receive {
+        let decimals = (t.decimals)(receive.mint)?;
+        t.s("\nMUST RECEIVE: at least ");
+        t.amount(receive.min, decimals);
         t.s(" of mint ");
-        t.key(price.mint);
-        t.s(" to ");
-        t.key(price.to);
-        t.s(" for every ");
-        t.amount(price.den, (t.decimals)(terms.limits()[0].mint)?);
-        t.s(" taken");
-        if let Some(decay) = price.decay {
+        t.key(receive.mint);
+        t.s(" in ");
+        t.key(receive.to);
+        t.s(" for each use");
+        if let Some(decay) = receive.decay {
             t.s(", moving to ");
-            t.amount(decay.num, paid);
+            t.amount(decay.min, decimals);
             t.s(" from ");
             t.time(decay.t0)?;
             t.s(" to ");

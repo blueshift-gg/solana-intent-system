@@ -2,10 +2,10 @@
 //! text come from the same code the program runs, so no JavaScript
 //! reimplements the codec, the validity rules or the canonical text.
 //!
-//! Integers that can exceed 2^53 (amounts, rates, the salt) are strings.
+//! Integers that can exceed 2^53 (amounts, the salt) are strings.
 
 use mandate_core::render::render;
-use mandate_core::terms::{Decay, Limit, Per, Price, Terms};
+use mandate_core::terms::{Decay, Limit, Per, Receive, Terms};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -19,7 +19,7 @@ struct TermsJson {
     not_after: Option<i64>,
     salt: String,
     limits: Vec<LimitJson>,
-    price: Option<PriceJson>,
+    receive: Option<ReceiveJson>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -39,11 +39,10 @@ enum PerJson {
 }
 
 #[derive(Serialize, Deserialize)]
-struct PriceJson {
+struct ReceiveJson {
     to: String,
     mint: String,
-    num: String,
-    den: String,
+    min: String,
     decay: Option<DecayJson>,
 }
 
@@ -51,7 +50,7 @@ struct PriceJson {
 struct DecayJson {
     t0: i64,
     t1: i64,
-    num: String,
+    min: String,
 }
 
 /// Canonical bytes for the terms, after the validity rules (`Terms::validate`).
@@ -83,21 +82,20 @@ pub fn encode_terms(json: &str) -> Result<Vec<u8>, JsError> {
             })
         })
         .collect::<Result<Vec<_>, JsError>>()?;
-    let paid = match &j.price {
-        Some(p) => Some((key(&p.to)?, key(&p.mint)?)),
+    let paid = match &j.receive {
+        Some(x) => Some((key(&x.to)?, key(&x.mint)?)),
         None => None,
     };
-    let price = match (&j.price, &paid) {
-        (Some(p), Some((to, mint))) => Some(Price {
+    let receive = match (&j.receive, &paid) {
+        (Some(x), Some((to, mint))) => Some(Receive {
             to,
             mint,
-            num: p.num.parse()?,
-            den: p.den.parse()?,
-            decay: match &p.decay {
+            min: x.min.parse()?,
+            decay: match &x.decay {
                 Some(d) => Some(Decay {
                     t0: d.t0,
                     t1: d.t1,
-                    num: d.num.parse()?,
+                    min: d.min.parse()?,
                 }),
                 None => None,
             },
@@ -111,7 +109,7 @@ pub fn encode_terms(json: &str) -> Result<Vec<u8>, JsError> {
         (j.not_before, j.not_after),
         j.salt.parse()?,
         &limits,
-        price,
+        receive,
     );
     terms.validate().map_err(error)?;
     let mut bytes = Vec::new();
@@ -144,15 +142,14 @@ pub fn decode_terms(bytes: &[u8]) -> Result<String, JsError> {
         not_after: t.not_after,
         salt: t.salt.to_string(),
         limits,
-        price: t.price.map(|p| PriceJson {
-            to: b58(p.to),
-            mint: b58(p.mint),
-            num: p.num.to_string(),
-            den: p.den.to_string(),
-            decay: p.decay.map(|d| DecayJson {
+        receive: t.receive.map(|x| ReceiveJson {
+            to: b58(x.to),
+            mint: b58(x.mint),
+            min: x.min.to_string(),
+            decay: x.decay.map(|d| DecayJson {
                 t0: d.t0,
                 t1: d.t1,
-                num: d.num.to_string(),
+                min: d.min.to_string(),
             }),
         }),
     };

@@ -10,7 +10,7 @@ import init, { decodeTerms, encodeTerms, errorName, renderText } from '../wasm/m
  */
 export type Terms = {
     authority: Address;
-    /** Who may pull. `null` is anyone, which is only valid with a price. */
+    /** Who may pull. `null` is anyone, which is only valid if the authority receives something. */
     spender: Address | null;
     notBefore: number;
     /** `null` runs until closed. A signed intent must expire. */
@@ -18,7 +18,7 @@ export type Terms = {
     /** Tells apart otherwise identical terms. For a signed intent it is also the nonce. */
     salt: string;
     limits: Limit[];
-    price: Price | null;
+    receive: Receive | null;
 };
 
 /**
@@ -34,16 +34,16 @@ export type Limit = {
 };
 
 /**
- * For every `den` taken, the spender pays at least `num` of `mint` into `to`,
- * a token account of the authority, inside the pull. With `decay` the rate
- * moves in a straight line to `decay.num` between `t0` and `t1`.
+ * Each use, the spender pays at least `min` of `mint` into `to`, a token
+ * account of the authority, inside the pull, whatever amount it takes. With
+ * `decay` the minimum moves in a straight line to `decay.min` between `t0`
+ * and `t1`.
  */
-export type Price = {
+export type Receive = {
     to: Address;
     mint: Address;
-    num: string;
-    den: string;
-    decay: { t0: number; t1: number; num: string } | null;
+    min: string;
+    decay: { t0: number; t1: number; min: string } | null;
 };
 
 let loaded: Promise<unknown> | undefined;
@@ -82,7 +82,7 @@ export async function termsId(bytes: Uint8Array): Promise<Uint8Array> {
     return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
 }
 
-/** A fresh salt: a new policy for the same terms, or a new nonce for a signed intent. */
+/** A random salt, for a policy: a new policy for terms that are otherwise the same. For an intent use `nextSalt`. */
 export const randomSalt = (): string => crypto.getRandomValues(new BigUint64Array(1))[0].toString();
 
 /**
@@ -104,7 +104,7 @@ export function subscriptionTerms(p: {
         limits: [{ from: p.account, max: p.amount.toString(), mint: p.mint, per: { every: p.period } }],
         notAfter: p.end ?? null,
         notBefore: p.start,
-        price: null,
+        receive: null,
         salt: randomSalt(),
         spender: p.merchant,
     };

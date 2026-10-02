@@ -33,12 +33,14 @@ pub const ENGINE_BUMP: u8 = 254;
 /// seed so nobody can pre-create another authority's policy.
 pub const POLICY_SEED: &[u8] = b"policy";
 
-/// Used nonces of signed intents: [NONCES_SEED, authority, day], where `day`
-/// is the intent's expiry in whole days, little-endian. Every intent in a
-/// page is dead once that day is over, so the page can then be closed.
+/// Used nonces of signed intents: [NONCES_SEED, authority, day, page], both
+/// little-endian. `day` is the intent's expiry in whole days: every intent in
+/// a page is dead once that day is over, so the page can then be closed.
+/// `page` is the intent's salt divided by `NONCE_BITS`, and its bit in the
+/// page is the remainder: every salt has its own bit.
 pub const NONCES_SEED: &[u8] = b"nonces";
 pub const NONCE_DAY: i64 = 86_400;
-/// Nonces in one page; an intent's nonce is its salt modulo this.
+/// Nonces in one page.
 pub const NONCE_BITS: usize = 1024;
 
 /// Account tags: the first byte of every account, one per type.
@@ -51,4 +53,4 @@ pub const EVENT_DISCRIMINATOR: u8 = 255;
 pub const LEDGER_LEN: usize = 8 + MAX_LIMITS * 8; // 72
 /// Fixed header; the canonical terms follow it.
 pub const POLICY_LEN: usize = 1 + LEDGER_LEN + 32 + 2; // 107
-pub const NONCES_LEN: usize = 1 + 32 + 8 + NONCE_BITS / 8; // 169
+pub const NONCES_LEN: usize = 1 + 2 * 32 + 2 * 8 + NONCE_BITS / 8; // 209

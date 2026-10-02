@@ -1,9 +1,7 @@
-import { getAddressDecoder, getBase64Encoder, type Rpc, type SolanaRpcApi } from '@solana/kit';
+import { type Address, getAddressDecoder, getBase64Encoder, type Rpc, type SolanaRpcApi } from '@solana/kit';
 
-import { findPolicyPda, findNoncesPda } from './program.ts';
+import { findNoncesPda, findPolicyPda, NONCE_BITS } from './program.ts';
 import { decode, termsId } from './terms.ts';
-
-const NONCE_BITS = 1024n;
 
 const read = async (rpc: Rpc<SolanaRpcApi>, account: Parameters<Rpc<SolanaRpcApi>['getAccountInfo']>[0]) => {
     const { value } = await rpc.getAccountInfo(account, { encoding: 'base64' }).send();
@@ -32,13 +30,35 @@ export async function fetchPolicy(rpc: Rpc<SolanaRpcApi>, terms: Uint8Array, now
     return { payer: getAddressDecoder().decode(data.subarray(73, 105)), spent };
 }
 
+/** The used-nonce bits of one page, or null if the page is not on chain. */
+async function fetchNonces(rpc: Rpc<SolanaRpcApi>, authority: Address, notAfter: number, salt: bigint) {
+    // tag, payer, authority, day: i64, page: u64, bits
+    return (await read(rpc, await findNoncesPda(authority, notAfter, salt)))?.subarray(81) ?? null;
+}
+
+const used = (bits: Uint8Array | null, salt: bigint) => {
+    const bit = Number(salt % NONCE_BITS);
+    return !!bits && (bits[bit >> 3] & (1 << (bit & 7))) !== 0;
+};
+
 /** Whether a signed intent's nonce is used: it ran, or its authority cancelled it. */
 export async function fetchIntentUsed(rpc: Rpc<SolanaRpcApi>, terms: Uint8Array): Promise<boolean> {
     const t = decode(terms);
     if (t.notAfter === null) throw new Error('an intent must expire');
-    const data = await read(rpc, await findNoncesPda(t.authority, t.notAfter));
-    if (!data) return false;
-    // tag, payer, day: i64, bits
-    const bit = Number(BigInt(t.salt) % NONCE_BITS);
-    return (data[41 + (bit >> 3)] & (1 << (bit & 7))) !== 0;
+    return used(await fetchNonces(rpc, t.authority, t.notAfter, BigInt(t.salt)), BigInt(t.salt));
+}
+
+/**
+ * The lowest salt whose nonce is free for an intent of `authority` that
+ * expires at `notAfter`. Salts handed out this way share pages, so an owner
+ * pays for one page per 1,024 intents that expire on the same day. `skip`
+ * are salts already given to intents that are signed but not yet on chain.
+ */
+export async function nextSalt(rpc: Rpc<SolanaRpcApi>, authority: Address, notAfter: number, skip: string[] = []): Promise<string> {
+    for (let page = 0n; ; page++) {
+        const bits = await fetchNonces(rpc, authority, notAfter, page * NONCE_BITS);
+        for (let salt = page * NONCE_BITS; salt < (page + 1n) * NONCE_BITS; salt++) {
+            if (!used(bits, salt) && !skip.includes(salt.toString())) return salt.toString();
+        }
+    }
 }

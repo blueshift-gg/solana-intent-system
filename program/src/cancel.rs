@@ -14,7 +14,7 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 ///
 /// 1. authority:       [signer]
 /// 2. payer:           [signer, mut]   funds the page of nonces if it is new
-/// 3. nonces:          [mut]           PDA [NONCES_SEED, authority, expiry day]
+/// 3. nonces:          [mut]           PDA [NONCES_SEED, authority, expiry day, salt / NONCE_BITS]
 /// 4. system_program:  [executable]
 /// 5. engine:                          event signer
 /// 6. program:         [executable]    this program, for the event CPI
@@ -81,7 +81,14 @@ impl<'a> Cancel<'a> {
         let authority = self.authority.key();
 
         // Cancelling what was used or cancelled already changes nothing
-        nonces_for(self.payer, self.nonces, authority, self.not_after)?.take(self.salt);
+        nonces_for(
+            self.payer,
+            self.nonces,
+            authority,
+            self.not_after,
+            self.salt,
+        )?
+        .take(self.salt);
 
         // Log the Cancel Event
         emit(

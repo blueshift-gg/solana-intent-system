@@ -14,7 +14,7 @@ pub struct Legs<'a> {
     pub mint: &'a AccountInfo,
     pub to: &'a AccountInfo,
     pub engine: &'a AccountInfo,
-    /// `[pay_from, pay_mint, pay_to]` when the terms have a price.
+    /// `[pay_from, pay_mint, pay_to]` when the authority receives something.
     pub payment: &'a [AccountInfo],
 }
 
@@ -34,27 +34,27 @@ impl Legs<'_> {
     }
 
     /// Take `amount` as the delegate, only from the authority's own account.
-    /// If the terms have a price the spender pays it, and the authority must
-    /// receive all of it. Returns what was paid.
+    /// If the terms say what the authority receives, the spender pays it, and
+    /// all of it must arrive. Returns what was paid.
     pub fn settle(&self, terms: &Terms, amount: u64, now: i64) -> Result<u64, ProgramError> {
         balance(self.from, self.mint.key(), terms.authority)?;
         transfer(self.from, self.mint, self.to, self.engine, amount)?;
 
-        let Some(price) = terms.price else {
+        let Some(receive) = terms.receive else {
             return Ok(0);
         };
         let [pay_from, pay_mint, pay_to, ..] = self.payment else {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
-        if price.to.ne(pay_to.key()) || price.mint.ne(pay_mint.key()) {
+        if receive.to.ne(pay_to.key()) || receive.mint.ne(pay_mint.key()) {
             return Err(MandateError::InvalidTarget.into());
         }
-        let due = price.due(amount, now)?;
-        let before = balance(pay_to, price.mint, terms.authority)?;
+        let due = receive.due(now);
+        let before = balance(pay_to, receive.mint, terms.authority)?;
         transfer(pay_from, pay_mint, pay_to, self.spender, due)?;
-        let after = balance(pay_to, price.mint, terms.authority)?;
+        let after = balance(pay_to, receive.mint, terms.authority)?;
         if after.checked_sub(before).is_none_or(|got| got < due) {
-            return Err(MandateError::PriceNotPaid.into());
+            return Err(MandateError::NotReceived.into());
         }
         Ok(due)
     }
@@ -63,13 +63,13 @@ impl Legs<'_> {
 /// # Pull
 ///
 /// Take tokens under a policy, within every limit on the account. If the
-/// policy has a price, the spender pays it to the authority here, in the same
-/// instruction: there is nothing in between to trust. Callable by CPI.
+/// policy says what the authority receives, the spender pays it here, in the
+/// same instruction: there is nothing in between to trust. Callable by CPI.
 ///
 /// > Check the window and the spender
 /// > Check the amount against every limit on the source, and record it
 /// > Transfer from the source, as the engine delegate
-/// > Price: transfer the payment from the spender, and check what arrived
+/// > Receive: transfer the payment from the spender, and check what arrived
 ///
 /// Accounts:
 ///
@@ -82,11 +82,11 @@ impl Legs<'_> {
 /// 7. program:         [executable]    this program, for the event CPI
 /// 8. token_program:   [executable]    of `from`
 ///
-/// With a price, also:
+/// If the authority receives something, also:
 ///
 /// 9. pay_from:        [mut]           the spender's token account
-/// 10. pay_mint:                       the price's mint
-/// 11. pay_to:         [mut]           the authority's token account the price names
+/// 10. pay_mint:                       the mint the authority receives
+/// 11. pay_to:         [mut]           the authority's token account the terms name
 /// 12. pay_program:    [executable]    token program of `pay_from`
 ///
 /// Parameters:

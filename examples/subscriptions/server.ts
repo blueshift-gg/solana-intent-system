@@ -93,7 +93,7 @@ export function fathom(): Plugin {
         const t = decode(member.terms);
         const [limit] = t.limits;
         const period = typeof limit.per === 'object' ? limit.per.every : 0;
-        if (!plan || t.authority !== member.address || t.limits.length !== 1 || t.price) return 'This approval is not for a Fathom plan';
+        if (!plan || t.authority !== member.address || t.limits.length !== 1 || t.receive) return 'This approval is not for a Fathom plan';
         if (limit.mint !== USDC || BigInt(limit.max) !== plan.price || period !== plan.period) return 'This approval does not match the plan';
         if (t.spender !== signer.address) return 'This approval does not name Fathom as its spender';
         return null;

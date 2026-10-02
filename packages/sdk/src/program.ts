@@ -24,9 +24,20 @@ const key = (a: Address) => getAddressEncoder().encode(a);
 export const findPolicyPda = async (authority: Address, id: Uint8Array) =>
     (await getProgramDerivedAddress({ programAddress: MANDATE_PROGRAM_ADDRESS, seeds: ['policy', key(authority), id] }))[0];
 
-/** The page of nonces for intents of `authority` that expire at `notAfter`: one page per day of expiry. */
-export const findNoncesPda = async (authority: Address, notAfter: number) =>
-    (await getProgramDerivedAddress({ programAddress: MANDATE_PROGRAM_ADDRESS, seeds: ['nonces', key(authority), getI64Encoder().encode(Math.floor(notAfter / 86_400))] }))[0];
+/** Nonces in one page. */
+export const NONCE_BITS = 1024n;
+
+/**
+ * The page that holds the nonce of an intent: one per authority, per day of
+ * expiry, per 1,024 salts. An intent's bit in it is its salt modulo 1,024.
+ */
+export const findNoncesPda = async (authority: Address, notAfter: number, salt: bigint) =>
+    (
+        await getProgramDerivedAddress({
+            programAddress: MANDATE_PROGRAM_ADDRESS,
+            seeds: ['nonces', key(authority), getI64Encoder().encode(Math.floor(notAfter / 86_400)), getU64Encoder().encode(salt / NONCE_BITS)],
+        })
+    )[0];
 
 const signer = (s: TransactionSigner, role = AccountRole.READONLY_SIGNER): AccountMeta => ({ address: s.address, role, signer: s }) as AccountMeta;
 const writable = (a: Address): AccountMeta => ({ address: a, role: AccountRole.WRITABLE });
@@ -65,16 +76,16 @@ function legs(p: Legs & { from: Address }): AccountMeta[] {
     const t = decode(p.terms);
     const limit = t.limits.find((l) => l.from === p.from);
     if (!limit) throw new Error(`no limit of these terms covers ${p.from}`);
-    if (t.price && !p.payFrom) throw new Error('these terms have a price: pass payFrom');
-    const payment = t.price ? [writable(p.payFrom!), readonly(t.price.mint), writable(t.price.to), readonly(p.payTokenProgram ?? TOKEN_PROGRAM)] : [];
+    if (t.receive && !p.payFrom) throw new Error('the authority must receive something: pass payFrom');
+    const payment = t.receive ? [writable(p.payFrom!), readonly(t.receive.mint), writable(t.receive.to), readonly(p.payTokenProgram ?? TOKEN_PROGRAM)] : [];
     return [writable(p.from), readonly(limit.mint), writable(p.to), ...tail, readonly(p.tokenProgram ?? TOKEN_PROGRAM), ...payment];
 }
 
 /**
  * Take `amount` under a policy, from `from` (a token account its terms
- * limit) into `to`. If the terms have a price, `payFrom` is the spender's
- * token account that pays it; the program moves the payment itself and
- * checks what arrives.
+ * limit) into `to`. If the terms say what the authority receives, `payFrom`
+ * is the spender's token account that pays it; the program moves the payment
+ * itself and checks what arrives.
  */
 export const getPullInstruction = async (p: Legs & { spender: TransactionSigner; from: Address; amount: bigint }): Promise<Instruction> => ({
     accounts: [signer(p.spender), writable(await policyAddress(p.terms)), ...legs(p)],
@@ -85,8 +96,8 @@ export const getPullInstruction = async (p: Legs & { spender: TransactionSigner;
 /**
  * Run a signed intent, once: `terms` the authority signed as text
  * (`message()`), which must expire and limit one token account. Nothing goes
- * on chain first; `payer` funds the page of nonces if it is the first intent
- * of its expiry day, and gets that back when the day is over.
+ * on chain first; `payer` funds the page of nonces if this intent is the
+ * first in it, and gets that back when the day of the expiry is over.
  */
 export const getFillInstruction = async (
     p: Legs & { spender: TransactionSigner; payer: TransactionSigner; signature: Uint8Array; amount: bigint },
@@ -97,7 +108,7 @@ export const getFillInstruction = async (
         accounts: [
             signer(p.spender),
             signer(p.payer, AccountRole.WRITABLE_SIGNER),
-            writable(await findNoncesPda(t.authority, t.notAfter)),
+            writable(await findNoncesPda(t.authority, t.notAfter, BigInt(t.salt))),
             readonly(SYSTEM),
             ...legs({ ...p, from: t.limits[0].from }),
         ],
@@ -114,7 +125,7 @@ export const getCancelInstruction = async (p: { authority: TransactionSigner; pa
         accounts: [
             signer(p.authority),
             signer(p.payer, AccountRole.WRITABLE_SIGNER),
-            writable(await findNoncesPda(t.authority, t.notAfter)),
+            writable(await findNoncesPda(t.authority, t.notAfter, BigInt(t.salt))),
             readonly(SYSTEM),
             ...tail,
         ],

@@ -32,22 +32,21 @@ pub struct Limit<'a> {
     pub per: Per,
 }
 
-/// The rate moves in a straight line to `num` between `t0` and `t1`.
+/// The minimum moves in a straight line to `min` between `t0` and `t1`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Decay {
     pub t0: i64,
     pub t1: i64,
-    pub num: u64,
+    pub min: u64,
 }
 
-/// "For every `den` taken, at least `num` of `mint` arrives in `to`", a token
-/// account of the authority. The spender pays it inside the pull.
+/// "Each use, at least `min` of `mint` arrives in `to`", a token account of
+/// the authority. The spender pays it inside the pull, whatever it takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Price<'a> {
+pub struct Receive<'a> {
     pub to: &'a Pubkey,
     pub mint: &'a Pubkey,
-    pub num: u64,
-    pub den: u64,
+    pub min: u64,
     pub decay: Option<Decay>,
 }
 
@@ -55,7 +54,7 @@ pub struct Price<'a> {
 pub struct Terms<'a> {
     pub cluster: u8,
     pub authority: &'a Pubkey,
-    /// Who may pull. `None` is anyone, which is only valid with a price.
+    /// Who may pull. `None` is anyone, which is only valid if the authority receives something.
     pub spender: Option<&'a Pubkey>,
     pub not_before: i64,
     pub not_after: Option<i64>,
@@ -63,22 +62,20 @@ pub struct Terms<'a> {
     pub salt: u64,
     limits: [Limit<'a>; MAX_LIMITS],
     count: u8,
-    pub price: Option<Price<'a>>,
+    pub receive: Option<Receive<'a>>,
 }
 
-impl Price<'_> {
-    /// What must arrive for `amount` taken at `now`, rounded up.
-    pub fn due(&self, amount: u64, now: i64) -> Result<u64> {
-        let num = match self.decay {
-            None => self.num,
-            Some(Decay { t0, t1, num }) => {
-                // Truncates toward the starting rate
-                let moved = (num as i128 - self.num as i128) * (now.clamp(t0, t1) - t0) as i128;
-                (self.num as i128 + moved / (t1 - t0) as i128) as u64
+impl Receive<'_> {
+    /// What must arrive for a use at `now`.
+    pub fn due(&self, now: i64) -> u64 {
+        match self.decay {
+            None => self.min,
+            Some(Decay { t0, t1, min }) => {
+                // Truncates toward the starting minimum
+                let moved = (min as i128 - self.min as i128) * (now.clamp(t0, t1) - t0) as i128;
+                (self.min as i128 + moved / (t1 - t0) as i128) as u64
             }
-        };
-        let due = (amount as u128 * num as u128).div_ceil(self.den as u128);
-        u64::try_from(due).map_err(|_| MandateError::Overflow)
+        }
     }
 }
 
@@ -90,7 +87,7 @@ impl<'a> Terms<'a> {
         window: (i64, Option<i64>),
         salt: u64,
         limits: &[Limit<'a>],
-        price: Option<Price<'a>>,
+        receive: Option<Receive<'a>>,
     ) -> Self {
         let empty = Limit {
             from: &ZERO,
@@ -111,7 +108,7 @@ impl<'a> Terms<'a> {
             limits: list,
             // One past the maximum survives, so `validate` rejects it
             count: limits.len().min(MAX_LIMITS + 1) as u8,
-            price,
+            receive,
         }
     }
 
@@ -152,17 +149,16 @@ impl<'a> Terms<'a> {
         }
         terms.cluster = cluster;
         terms.count = count as u8;
-        terms.price = r.option(|r| {
-            Ok(Price {
+        terms.receive = r.option(|r| {
+            Ok(Receive {
                 to: r.key()?,
                 mint: r.key()?,
-                num: r.u64()?,
-                den: r.u64()?,
+                min: r.u64()?,
                 decay: r.option(|r| {
                     Ok(Decay {
                         t0: r.i64()?,
                         t1: r.i64()?,
-                        num: r.u64()?,
+                        min: r.u64()?,
                     })
                 })?,
             })
@@ -194,18 +190,16 @@ impl<'a> Terms<'a> {
             let mut on_account = limits.iter().filter(|m| m.from == l.from);
             on_account.any(|m| m.per != Per::Use)
         });
-        let price = self.price.is_none_or(|p| {
-            // One input token, so "for every `den` taken" has one meaning
-            let one_source = limits.iter().all(|l| l.from == limits[0].from);
-            let decay = p
+        let receive = self.receive.is_none_or(|x| {
+            let decay = x
                 .decay
-                .is_none_or(|d| renderable(d.t0) && renderable(d.t1) && d.t0 < d.t1 && d.num > 0);
-            one_source && p.num > 0 && p.den > 0 && decay
+                .is_none_or(|d| renderable(d.t0) && renderable(d.t1) && d.t0 < d.t1 && d.min > 0);
+            x.min > 0 && decay
         });
-        // Someone must be bound: a spender, or a price the owner is paid.
-        // Otherwise the policy pays whoever finds it
-        let bound = self.spender.is_some() || self.price.is_some();
-        if !(window && sized && positive && capped && price && bound) {
+        // Someone must be bound: a spender, or something the authority
+        // receives. Otherwise the terms pay whoever finds them
+        let bound = self.spender.is_some() || self.receive.is_some();
+        if !(window && sized && positive && capped && receive && bound) {
             return Err(MandateError::InvalidTerms);
         }
         Ok(())
@@ -231,15 +225,14 @@ impl<'a> Terms<'a> {
             w.put(&[tag]);
             w.put(&seconds.to_le_bytes());
         }
-        option(w, self.price, |w, p| {
-            w.put(p.to);
-            w.put(p.mint);
-            w.put(&p.num.to_le_bytes());
-            w.put(&p.den.to_le_bytes());
-            option(w, p.decay, |w, d| {
+        option(w, self.receive, |w, x| {
+            w.put(x.to);
+            w.put(x.mint);
+            w.put(&x.min.to_le_bytes());
+            option(w, x.decay, |w, d| {
                 w.put(&d.t0.to_le_bytes());
                 w.put(&d.t1.to_le_bytes());
-                w.put(&d.num.to_le_bytes());
+                w.put(&d.min.to_le_bytes());
             });
         });
     }

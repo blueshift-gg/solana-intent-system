@@ -55,8 +55,8 @@ pub enum MandateError {
     InvalidTarget,
     /// An amount overflowed
     Overflow,
-    /// The authority received less than the price requires
-    PriceNotPaid,
+    /// The authority received less than the terms require
+    NotReceived,
     /// Only the engine PDA may invoke the event instruction
     InvalidEventAuthority,
 }
@@ -89,7 +89,7 @@ impl MandateError {
         MandateError::LimitExceeded,
         MandateError::InvalidTarget,
         MandateError::Overflow,
-        MandateError::PriceNotPaid,
+        MandateError::NotReceived,
         MandateError::InvalidEventAuthority,
     ];
 }

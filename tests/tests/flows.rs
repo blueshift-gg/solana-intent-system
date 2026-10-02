@@ -2,7 +2,7 @@
 
 use mandate_core::constants::*;
 use mandate_core::errors::MandateError;
-use mandate_core::terms::{Decay, Per, Price};
+use mandate_core::terms::{Decay, Per, Receive};
 use mandate_tests::*;
 use solana_address::Address;
 use solana_instruction::Instruction;
@@ -196,9 +196,15 @@ fn a_signed_intent_runs_once_and_costs_its_signer_nothing() {
         MandateError::NonceUsed
     ));
 
+    // Every salt has its own bit: salt 1024 is bit 0 of the next page, and runs
+    week.salt = NONCE_BITS as u64;
+    let signature = sign(&week, &user.key, f.decimals());
+    let ix = fill(&spender, &week, &signature, take, USDC, None);
+    f.send(&[ix], &[&payee.key]).unwrap();
+
     // Once the day of the expiry is over, every intent in the page is dead and
     // anyone returns its rent to the payee, who paid for it
-    let page = nonces_pda(&owner, expiry);
+    let page = nonces_pda(&owner, expiry, 0);
     let reclaim = close(&stranger.address(), &page, &spender);
     f.set_time(expiry);
     assert!(refused(
@@ -314,7 +320,7 @@ fn limits_stack_on_one_account() {
 }
 
 #[test]
-fn anyone_fills_a_signed_order_at_a_decaying_price() {
+fn anyone_fills_a_signed_order_for_what_the_owner_must_receive() {
     let mut f = Fixture::new();
     let user = f.wallet(100 * USDC, 0);
     let (first, second) = (f.wallet(0, 10 * SOL), f.wallet(0, 10 * SOL));
@@ -325,25 +331,24 @@ fn anyone_fills_a_signed_order_at_a_decaying_price() {
     );
     let (user_usdc, user_sol) = (user.usdc.to_bytes(), user.sol.to_bytes());
 
-    // Sell at most 100 USDC to anyone, for at least 0.0052 SOL each, falling
-    // to 0.0050 over five minutes
+    // Out: at most 100 USDC, to anyone. In: at least 0.52 SOL, falling to
+    // 0.50 over five minutes
     let limits = [limit(&user_usdc, &usdc, 100 * USDC, Per::Total)];
-    let price = Price {
+    let receive = Receive {
         to: &user_sol,
         mint: &sol,
-        num: 5_200_000,
-        den: USDC,
+        min: 520_000_000,
         decay: Some(Decay {
             t0: NOW,
             t1: NOW + 300,
-            num: 5_000_000,
+            min: 500_000_000,
         }),
     };
-    let order = terms(&u, None, Some(NOW + 600), &limits, Some(price));
+    let order = terms(&u, None, Some(NOW + 600), &limits, Some(receive));
     let signature = sign(&order, &user.key, f.decimals());
 
-    // Halfway down, a solver fills it at 0.0051 in one instruction: the
-    // signature, both transfers and the price check
+    // Halfway down, a solver fills it for 0.51 SOL in one instruction: the
+    // signature, both transfers and the check of what arrived
     f.set_time(NOW + 150);
     let fill_by = |f: &Fixture, solver: &Wallet, amount: u64| {
         let take = (user.usdc, f.usdc, solver.usdc);
@@ -365,7 +370,7 @@ fn anyone_fills_a_signed_order_at_a_decaying_price() {
 }
 
 #[test]
-fn a_priced_policy_fills_in_parts_for_anyone() {
+fn dca_runs_once_a_day_for_anyone_who_delivers() {
     let mut f = Fixture::new();
     let user = f.wallet(100 * USDC, 0);
     let (first, second) = (f.wallet(0, 10 * SOL), f.wallet(0, 10 * SOL));
@@ -377,39 +382,39 @@ fn a_priced_policy_fills_in_parts_for_anyone() {
     let (user_usdc, user_sol) = (user.usdc.to_bytes(), user.sol.to_bytes());
     let owner = user.address();
 
-    // A limit order resting on chain: 100 USDC in total, at least 0.005 SOL each
-    let limits = [limit(&user_usdc, &usdc, 100 * USDC, Per::Total)];
-    let price = Price {
+    // Out: at most 10 USDC every day, to anyone. In: at least 0.05 SOL each time
+    let limits = [limit(&user_usdc, &usdc, 10 * USDC, Per::Every(DAY as u32))];
+    let receive = Receive {
         to: &user_sol,
         mint: &sol,
-        num: 5_000_000,
-        den: USDC,
+        min: 50_000_000,
         decay: None,
     };
-    let bytes = encode(&terms(&u, None, None, &limits, Some(price)));
+    let bytes = encode(&terms(&u, None, None, &limits, Some(receive)));
     f.send(&[create(&owner, &owner, &bytes)], &[&user.key])
         .unwrap();
 
-    let fill_by = |f: &mut Fixture, solver: &Wallet, amount: u64| {
-        let take = (user.usdc, f.usdc, solver.usdc);
-        let pay = Some((solver.sol, f.sol, user.sol));
-        let ix = pull(&solver.address(), &owner, &bytes, take, amount, pay, TOKEN);
-        f.send(&[ix], &[&solver.key])
+    let run = |f: &mut Fixture, keeper: &Wallet, amount: u64| {
+        let take = (user.usdc, f.usdc, keeper.usdc);
+        let pay = Some((keeper.sol, f.sol, user.sol));
+        let ix = pull(&keeper.address(), &owner, &bytes, take, amount, pay, TOKEN);
+        f.send(&[ix], &[&keeper.key])
     };
-    fill_by(&mut f, &first, 30 * USDC).unwrap();
-    fill_by(&mut f, &second, 70 * USDC).unwrap();
+    run(&mut f, &first, 10 * USDC).unwrap();
     assert!(refused(
-        fill_by(&mut f, &second, 1),
+        run(&mut f, &second, 1),
         MandateError::LimitExceeded
     ));
+    f.set_time(NOW + DAY);
+    run(&mut f, &second, 10 * USDC).unwrap();
 
     assert_eq!(
         (f.balance(&user.usdc), f.balance(&user.sol)),
-        (0, 500_000_000)
+        (80 * USDC, 100_000_000)
     );
     assert_eq!(
         (f.balance(&first.usdc), f.balance(&second.usdc)),
-        (30 * USDC, 70 * USDC)
+        (10 * USDC, 10 * USDC)
     );
 }
 
@@ -437,7 +442,7 @@ fn a_policy_reaches_only_its_authoritys_accounts() {
 }
 
 /// A Token-2022 transfer fee comes out of what arrives. The payer never gives
-/// up more than the limit, and a price paid in such a token is refused unless
+/// up more than the limit, and a payment in such a token is refused unless
 /// the authority receives all of it.
 #[test]
 fn a_fee_token_never_shorts_the_authority() {
@@ -509,16 +514,15 @@ fn a_fee_token_never_shorts_the_authority() {
     assert_eq!(held(&f, &user_fee), 90 * USDC);
     assert_eq!(held(&f, &merchant_fee), 110 * USDC - USDC / 10);
 
-    // Paying a price in the fee token: what arrives is short, so the pull is refused
+    // Receiving the fee token: what arrives is short, so the pull is refused
     let limits = [limit(&user_usdc, &usdc, 10 * USDC, Per::Total)];
-    let price = Price {
+    let receive = Receive {
         to: &user_fee_key,
         mint: &fee,
-        num: 1,
-        den: 1,
+        min: 10 * USDC,
         decay: None,
     };
-    let bytes = encode(&terms(&u, None, None, &limits, Some(price)));
+    let bytes = encode(&terms(&u, None, None, &limits, Some(receive)));
     f.send(&[create(&owner, &owner, &bytes)], &[&user.key])
         .unwrap();
     let take = (user.usdc, f.usdc, merchant.usdc);
@@ -530,7 +534,7 @@ fn a_fee_token_never_shorts_the_authority() {
         ));
     assert!(refused(
         f.send(&[ix], &[&merchant.key]),
-        MandateError::PriceNotPaid
+        MandateError::NotReceived
     ));
     assert_eq!(f.balance(&user.usdc), 100 * USDC);
 }

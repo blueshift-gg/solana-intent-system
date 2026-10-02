@@ -1,4 +1,4 @@
-use mandate_core::terms::{Decay, Per, Price, Terms};
+use mandate_core::terms::{Decay, Per, Receive, Terms};
 use mandate_tests::*;
 use solana_address::Address;
 
@@ -49,18 +49,17 @@ fn order_renders_its_canonical_text() {
     let (authority, usdc, sol) = (key(AUTHORITY), key(USDC_MINT), key(SOL_MINT));
     let (from, to) = (key(FROM), key(TO));
     let limits = [limit(&from, &usdc, 100 * USDC, Per::Total)];
-    let price = Price {
+    let receive = Receive {
         to: &to,
         mint: &sol,
-        num: 5_200_000,
-        den: USDC,
+        min: 520_000_000,
         decay: Some(Decay {
             t0: NOW,
             t1: NOW + 300,
-            num: 5_000_000,
+            min: 500_000_000,
         }),
     };
-    let terms = terms(&authority, None, Some(NOW + 600), &limits, Some(price));
+    let terms = terms(&authority, None, Some(NOW + 600), &limits, Some(receive));
 
     assert_eq!(
         text(&terms, decimals),
@@ -70,7 +69,7 @@ engine: Mand89p7P6okjEKQx2SpwDX6mdb5zAcdpshRafFtv7A
 authority: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU
 SPENDER: anyone
 MAY TAKE: at most 100.000000 of mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v from 4dEfGh1uC6pK4CwNa5oZ2bJwmWv6kD6YQX7sKfM5tR2b in total
-PRICE: at least 0.005200000 of mint So11111111111111111111111111111111111111112 to 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM for every 1.000000 taken, moving to 0.005000000 from 2026-09-21T14:13:20Z to 2026-09-21T14:18:20Z
+MUST RECEIVE: at least 0.520000000 of mint So11111111111111111111111111111111111111112 in 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM for each use, moving to 0.500000000 from 2026-09-21T14:13:20Z to 2026-09-21T14:18:20Z
 VALID: from 2026-09-21T14:13:20Z until 2026-09-21T14:23:20Z
 SALT: 0"
     );
@@ -85,28 +84,27 @@ fn terms_round_trip_and_invalid_terms_are_refused() {
         limit(&from, &usdc, 10 * USDC, MONTHLY),
         limit(&from, &usdc, USDC, Per::Use),
     ];
-    let price = Price {
+    let receive = Receive {
         to: &to,
         mint: &sol,
-        num: 3,
-        den: 2,
+        min: 3,
         decay: None,
     };
-    let valid = terms(&authority, Some(&spender), None, &limits, Some(price));
+    let valid = terms(&authority, Some(&spender), None, &limits, Some(receive));
     let bytes = encode(&valid);
     let back = Terms::decode(&bytes).unwrap();
     assert_eq!(encode(&back), bytes);
     assert_eq!(back.limits(), limits);
-    assert_eq!(back.price, Some(price));
+    assert_eq!(back.receive, Some(receive));
 
-    // Nobody bound: anyone may spend, and the owner is paid nothing
+    // Nobody bound: anyone may spend, and the owner receives nothing
     assert!(!decoded(&terms(&authority, None, None, &limits, None)));
     assert!(decoded(&terms(
         &authority,
         None,
         None,
         &limits,
-        Some(price)
+        Some(receive)
     )));
     // A per-use cap with no limit that persists
     let alone = [limit(&from, &usdc, USDC, Per::Use)];
@@ -116,25 +114,6 @@ fn terms_round_trip_and_invalid_terms_are_refused() {
         None,
         &alone,
         None
-    )));
-    // A price over two different sources
-    let two = [
-        limit(&from, &usdc, USDC, Per::Total),
-        limit(&to, &sol, SOL, Per::Total),
-    ];
-    assert!(decoded(&terms(
-        &authority,
-        Some(&spender),
-        None,
-        &two,
-        None
-    )));
-    assert!(!decoded(&terms(
-        &authority,
-        Some(&spender),
-        None,
-        &two,
-        Some(price)
     )));
     // No limits, and more than the maximum
     assert!(!decoded(&terms(
@@ -174,18 +153,23 @@ fn every_byte_of_the_terms_is_visible_in_the_text() {
         limit(&from, &usdc, USDC, Per::Use),
         limit(&from, &usdc, 100 * USDC, Per::Total),
     ];
-    let price = Price {
+    let receive = Receive {
         to: &to,
         mint: &sol,
-        num: 5_200_000,
-        den: USDC,
+        min: 520_000_000,
         decay: Some(Decay {
             t0: NOW,
             t1: NOW + 300,
-            num: 5_000_000,
+            min: 500_000_000,
         }),
     };
-    let mut order = terms(&authority, None, Some(NOW + 600), &limits[2..], Some(price));
+    let mut order = terms(
+        &authority,
+        None,
+        Some(NOW + 600),
+        &limits[2..],
+        Some(receive),
+    );
     order.salt = 7;
     let subscription = terms(&authority, Some(&spender), None, &limits, None);
 
