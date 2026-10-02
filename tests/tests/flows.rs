@@ -5,6 +5,7 @@ use mandate_core::errors::MandateError;
 use mandate_core::terms::{Decay, Per, Price};
 use mandate_tests::*;
 use solana_address::Address;
+use solana_instruction::Instruction;
 use solana_signer::Signer;
 
 const DAY: i64 = 86_400;
@@ -31,7 +32,7 @@ fn subscription_is_one_instruction_and_resets_each_period() {
     // The merchant may take at most 10 USDC every 30 days, until revoked
     let limits = [limit(&user_usdc, &usdc, 10 * USDC, MONTHLY)];
     let bytes = encode(&terms(&u, Some(&m), None, &limits, None));
-    let create = create(&user.address(), &user.address(), &bytes, None);
+    let create = create(&user.address(), &user.address(), &bytes);
     f.send(&[create], &[&user.key]).unwrap();
 
     let pull = |f: &mut Fixture, day: i64, who: &Wallet, amount: u64| {
@@ -83,7 +84,7 @@ fn a_program_collects_a_subscription_by_cpi() {
 
     let limits = [limit(&user_usdc, &usdc, 10 * USDC, MONTHLY)];
     let bytes = encode(&terms(&u, Some(&m), None, &limits, None));
-    let create = create(&user.address(), &user.address(), &bytes, None);
+    let create = create(&user.address(), &user.address(), &bytes);
     f.send(&[create], &[&user.key]).unwrap();
 
     // The merchant's own program makes the pull, as it would while renewing a membership
@@ -107,72 +108,112 @@ fn a_program_collects_a_subscription_by_cpi() {
 }
 
 #[test]
-fn a_signature_creates_the_mandate_and_the_spender_pays_the_rent() {
+fn a_signed_intent_runs_once_and_costs_its_signer_nothing() {
     let mut f = Fixture::new();
     let user = f.wallet(100 * USDC, 0);
-    let merchant = f.wallet(0, 0);
-    let (u, m, usdc) = (
+    let (payee, stranger) = (f.wallet(0, 0), f.wallet(0, 0));
+    let (u, p, usdc) = (
         user.address().to_bytes(),
-        merchant.address().to_bytes(),
+        payee.address().to_bytes(),
         f.usdc.to_bytes(),
     );
     let user_usdc = user.usdc.to_bytes();
-    let limits = [limit(&user_usdc, &usdc, 10 * USDC, MONTHLY)];
-    let (owner, spender) = (user.address(), merchant.address());
+    let limits = [limit(&user_usdc, &usdc, 10 * USDC, Per::Total)];
+    let (owner, spender) = (user.address(), payee.address());
+    let take = (user.usdc, f.usdc, payee.usdc);
 
-    // A signature can only stand behind a mandate that expires
-    let forever = terms(&u, Some(&m), None, &limits, None);
+    // An intent must expire
+    let forever = terms(&u, Some(&p), None, &limits, None);
     let signature = sign(&forever, &user.key, f.decimals());
-    let ix = create(
-        &owner,
-        &spender,
-        &encode(&forever),
-        Some((&signature, &[f.usdc])),
+    let ix = Instruction {
+        accounts: fill(
+            &spender,
+            &terms(&u, Some(&p), Some(NOW + 1), &limits, None),
+            &signature,
+            take,
+            USDC,
+            None,
+        )
+        .accounts,
+        data: [
+            &[10][..],
+            &USDC.to_le_bytes(),
+            &signature,
+            &encode(&forever),
+        ]
+        .concat(),
+        program_id: PROGRAM,
+    };
+    assert!(refused(
+        f.send(&[ix], &[&payee.key]),
+        MandateError::InvalidIntent
+    ));
+
+    // Signed off chain, good for a week: the payee may take up to 10 USDC, once.
+    // This is what a durable nonce is used for, with nothing set up in advance
+    let expiry = NOW + 7 * DAY;
+    let mut week = terms(&u, Some(&p), Some(expiry), &limits, None);
+    let signature = sign(&week, &user.key, f.decimals());
+    let before = f.svm.get_balance(&owner).unwrap();
+
+    // Nobody else can run it, and not for more than it says
+    let theft = fill(
+        &stranger.address(),
+        &week,
+        &signature,
+        (user.usdc, f.usdc, stranger.usdc),
+        USDC,
+        None,
     );
     assert!(refused(
-        f.send(&[ix], &[&merchant.key]),
-        MandateError::ExpiryRequired
+        f.send(&[theft], &[&stranger.key]),
+        MandateError::InvalidSpender
+    ));
+    let ix = fill(&spender, &week, &signature, take, 10 * USDC + 1, None);
+    assert!(refused(
+        f.send(&[ix], &[&payee.key]),
+        MandateError::LimitExceeded
     ));
 
-    // Signed once, off chain, for a year. The merchant brings it with its first pull
-    let year = terms(&u, Some(&m), Some(NOW + 365 * DAY), &limits, None);
-    let signature = sign(&year, &user.key, f.decimals());
-    let bytes = encode(&year);
-    let accounts = (user.usdc, f.usdc, merchant.usdc);
-    let pull = pull(&spender, &owner, &bytes, accounts, 10 * USDC, None, TOKEN);
-    let create = create(&owner, &spender, &bytes, Some((&signature, &[f.usdc])));
-    f.send(&[create.clone(), pull.clone()], &[&merchant.key])
-        .unwrap();
-    f.set_time(NOW + 30 * DAY);
-    f.send(std::slice::from_ref(&pull), &[&merchant.key])
-        .unwrap();
-    assert_eq!(f.balance(&merchant.usdc), 20 * USDC);
+    // Five days later the payee lands it, taking 6. That was its one use
+    f.set_time(NOW + 5 * DAY);
+    let ix = fill(&spender, &week, &signature, take, 6 * USDC, None);
+    f.send(std::slice::from_ref(&ix), &[&payee.key]).unwrap();
+    assert!(refused(
+        f.send(&[ix], &[&payee.key]),
+        MandateError::NonceUsed
+    ));
+    assert_eq!(f.balance(&payee.usdc), 6 * USDC);
+    assert_eq!(f.svm.get_balance(&owner).unwrap(), before);
 
-    // The user cancels. The account stays, revoked, so the signature cannot
-    // create the mandate again; after the expiry anyone returns the rent to the merchant
-    let close = close(&owner, &owner, &bytes, &spender);
-    f.send(std::slice::from_ref(&close), &[&user.key]).unwrap();
-    f.set_time(NOW + 60 * DAY);
+    // Another intent, same terms but its own salt, is cancelled before anyone runs it
+    week.salt = 1;
+    let signature = sign(&week, &user.key, f.decimals());
+    f.send(&[cancel(&owner, expiry, 1)], &[&user.key]).unwrap();
+    let ix = fill(&spender, &week, &signature, take, USDC, None);
     assert!(refused(
-        f.send(&[pull], &[&merchant.key]),
-        MandateError::Revoked
+        f.send(&[ix], &[&payee.key]),
+        MandateError::NonceUsed
     ));
+
+    // Once the day of the expiry is over, every intent in the page is dead and
+    // anyone returns its rent to the payee, who paid for it
+    let page = nonces_pda(&owner, expiry);
+    let reclaim = close(&stranger.address(), &page, &spender);
+    f.set_time(expiry);
     assert!(refused(
-        f.send(&[create], &[&merchant.key]),
-        MandateError::AlreadyInitialized
+        f.send(std::slice::from_ref(&reclaim), &[&stranger.key]),
+        MandateError::NotClosable
     ));
-    let mandate = mandate_pda(&owner, &bytes);
-    let before = f.svm.get_balance(&spender).unwrap();
-    f.set_time(NOW + 365 * DAY);
-    let stranger = f.payer();
-    let reclaim = mandate_tests::close(&stranger.pubkey(), &owner, &bytes, &spender);
-    f.send(&[reclaim], &[&stranger]).unwrap();
-    assert!(f.svm.get_account(&mandate).is_none_or(|a| a.lamports == 0));
-    assert!(f.svm.get_balance(&spender).unwrap() > before);
+    let funded = f.svm.get_balance(&spender).unwrap();
+    f.set_time(expiry + DAY);
+    f.send(&[reclaim], &[&stranger.key]).unwrap();
+    assert!(f.svm.get_account(&page).is_none_or(|a| a.lamports == 0));
+    assert!(f.svm.get_balance(&spender).unwrap() > funded);
 }
 
 #[test]
-fn closing_returns_the_rent_to_whoever_paid_it() {
+fn closing_a_mandate_returns_the_rent_at_once() {
     let mut f = Fixture::new();
     let user = f.wallet(10 * USDC, 0);
     let (merchant, sponsor, stranger) = (f.wallet(0, 0), f.payer(), f.payer());
@@ -184,39 +225,37 @@ fn closing_returns_the_rent_to_whoever_paid_it() {
     let user_usdc = user.usdc.to_bytes();
     let (owner, payer) = (user.address(), sponsor.pubkey());
 
-    // The user signs the transaction; a sponsor pays the fee and the rent
+    // The user signs the transaction; a sponsor pays the fee and the rent.
+    // One mandate never expires, the other does: both close the same way
     let limits = [limit(&user_usdc, &usdc, USDC, MONTHLY)];
-    let mut both = Vec::new();
-    for salt in [1, 2] {
-        let mut terms = terms(&u, Some(&m), None, &limits, None);
-        terms.salt = salt;
-        let bytes = encode(&terms);
-        let create = create(&owner, &payer, &bytes, None);
+    let mut mandates = Vec::new();
+    for not_after in [None, Some(NOW + 365 * DAY)] {
+        let bytes = encode(&terms(&u, Some(&m), not_after, &limits, None));
+        let create = create(&owner, &payer, &bytes);
         f.send(&[create], &[&sponsor, &user.key]).unwrap();
-        both.push(bytes);
+        mandates.push(mandate_pda(&owner, &bytes));
     }
     let funded = f.svm.get_balance(&payer).unwrap();
 
-    // A stranger cannot close it. The owner can, and so can the spender;
-    // a mandate that never expires closes at once and the sponsor is repaid
-    let ix = close(&stranger.pubkey(), &owner, &both[0], &payer);
+    // A stranger cannot close it, and the rent cannot go to anyone but its payer.
+    // The owner can close, and so can the spender
+    let ix = close(&stranger.pubkey(), &mandates[0], &payer);
     assert!(refused(
         f.send(&[ix], &[&stranger]),
         MandateError::NotClosable
     ));
-    let ix = close(&owner, &owner, &both[0], &owner);
+    let ix = close(&owner, &mandates[0], &owner);
     assert!(refused(
         f.send(&[ix], &[&user.key]),
         MandateError::InvalidPayer
     ));
-    let ix = close(&owner, &owner, &both[0], &payer);
+    let ix = close(&owner, &mandates[0], &payer);
     f.send(&[ix], &[&user.key]).unwrap();
-    let ix = close(&merchant.address(), &owner, &both[1], &payer);
+    let ix = close(&merchant.address(), &mandates[1], &payer);
     f.send(&[ix], &[&merchant.key]).unwrap();
 
-    for bytes in &both {
-        let mandate = mandate_pda(&owner, bytes);
-        assert!(f.svm.get_account(&mandate).is_none_or(|a| a.lamports == 0));
+    for mandate in &mandates {
+        assert!(f.svm.get_account(mandate).is_none_or(|a| a.lamports == 0));
     }
     assert!(f.svm.get_balance(&payer).unwrap() > funded);
 }
@@ -240,7 +279,7 @@ fn limits_stack_on_one_account() {
         limit(&user_usdc, &usdc, 20 * USDC, Per::Total),
     ];
     let bytes = encode(&terms(&u, Some(&a), None, &limits, None));
-    let create = create(&user.address(), &user.address(), &bytes, None);
+    let create = create(&user.address(), &user.address(), &bytes);
     f.send(&[create], &[&user.key]).unwrap();
 
     let spend = |f: &mut Fixture, amount: u64| {
@@ -275,7 +314,7 @@ fn limits_stack_on_one_account() {
 }
 
 #[test]
-fn anyone_fills_a_signed_order_in_parts_at_a_decaying_price() {
+fn anyone_fills_a_signed_order_at_a_decaying_price() {
     let mut f = Fixture::new();
     let user = f.wallet(100 * USDC, 0);
     let (first, second) = (f.wallet(0, 10 * SOL), f.wallet(0, 10 * SOL));
@@ -300,36 +339,74 @@ fn anyone_fills_a_signed_order_in_parts_at_a_decaying_price() {
             num: 5_000_000,
         }),
     };
-    let terms = terms(&u, None, Some(NOW + 600), &limits, Some(price));
-    let signature = sign(&terms, &user.key, f.decimals());
-    let bytes = encode(&terms);
+    let order = terms(&u, None, Some(NOW + 600), &limits, Some(price));
+    let signature = sign(&order, &user.key, f.decimals());
+
+    // Halfway down, a solver fills it at 0.0051 in one instruction: the
+    // signature, both transfers and the price check
+    f.set_time(NOW + 150);
+    let fill_by = |f: &Fixture, solver: &Wallet, amount: u64| {
+        let take = (user.usdc, f.usdc, solver.usdc);
+        let pay = Some((solver.sol, f.sol, user.sol));
+        fill(&solver.address(), &order, &signature, take, amount, pay)
+    };
+    let ix = fill_by(&f, &first, 100 * USDC);
+    f.send(&[ix], &[&first.key]).unwrap();
+    assert_eq!(f.balance(&user.usdc), 0);
+    assert_eq!(f.balance(&user.sol), 510_000_000);
+    assert_eq!(f.balance(&first.usdc), 100 * USDC);
+
+    // It was one use: a second solver gets nothing
+    let ix = fill_by(&f, &second, USDC);
+    assert!(refused(
+        f.send(&[ix], &[&second.key]),
+        MandateError::NonceUsed
+    ));
+}
+
+#[test]
+fn a_priced_mandate_fills_in_parts_for_anyone() {
+    let mut f = Fixture::new();
+    let user = f.wallet(100 * USDC, 0);
+    let (first, second) = (f.wallet(0, 10 * SOL), f.wallet(0, 10 * SOL));
+    let (u, usdc, sol) = (
+        user.address().to_bytes(),
+        f.usdc.to_bytes(),
+        f.sol.to_bytes(),
+    );
+    let (user_usdc, user_sol) = (user.usdc.to_bytes(), user.sol.to_bytes());
     let owner = user.address();
 
-    let fill = |f: &mut Fixture, solver: &Wallet, amount: u64| {
+    // A limit order resting on chain: 100 USDC in total, at least 0.005 SOL each
+    let limits = [limit(&user_usdc, &usdc, 100 * USDC, Per::Total)];
+    let price = Price {
+        to: &user_sol,
+        mint: &sol,
+        num: 5_000_000,
+        den: USDC,
+        decay: None,
+    };
+    let bytes = encode(&terms(&u, None, None, &limits, Some(price)));
+    f.send(&[create(&owner, &owner, &bytes)], &[&user.key])
+        .unwrap();
+
+    let fill_by = |f: &mut Fixture, solver: &Wallet, amount: u64| {
         let take = (user.usdc, f.usdc, solver.usdc);
         let pay = Some((solver.sol, f.sol, user.sol));
         let ix = pull(&solver.address(), &owner, &bytes, take, amount, pay, TOKEN);
         f.send(&[ix], &[&solver.key])
     };
-
-    // Halfway down, one solver brings the signature and takes 30 at 0.0051
-    f.set_time(NOW + 150);
-    let mints = [f.usdc, f.sol];
-    let create = create(&owner, &first.address(), &bytes, Some((&signature, &mints)));
-    f.send(&[create], &[&first.key]).unwrap();
-    fill(&mut f, &first, 30 * USDC).unwrap();
-    assert_eq!(f.balance(&user.sol), 153_000_000);
-
-    // Later another takes the rest at the floor, and the order is spent
-    f.set_time(NOW + 400);
-    fill(&mut f, &second, 70 * USDC).unwrap();
+    fill_by(&mut f, &first, 30 * USDC).unwrap();
+    fill_by(&mut f, &second, 70 * USDC).unwrap();
     assert!(refused(
-        fill(&mut f, &second, 1),
+        fill_by(&mut f, &second, 1),
         MandateError::LimitExceeded
     ));
 
-    assert_eq!(f.balance(&user.usdc), 0);
-    assert_eq!(f.balance(&user.sol), 153_000_000 + 350_000_000);
+    assert_eq!(
+        (f.balance(&user.usdc), f.balance(&user.sol)),
+        (0, 500_000_000)
+    );
     assert_eq!(
         (f.balance(&first.usdc), f.balance(&second.usdc)),
         (30 * USDC, 70 * USDC)
@@ -348,7 +425,7 @@ fn a_mandate_reaches_only_its_authoritys_accounts() {
     let limits = [limit(&victim_usdc, &usdc, 100 * USDC, Per::Total)];
     let bytes = encode(&terms(&t, Some(&t), None, &limits, None));
     let key = thief.address();
-    f.send(&[create(&key, &key, &bytes, None)], &[&thief.key])
+    f.send(&[create(&key, &key, &bytes)], &[&thief.key])
         .unwrap();
     let accounts = (victim.usdc, f.usdc, thief.usdc);
     let ix = pull(&key, &key, &bytes, accounts, USDC, None, TOKEN);
@@ -416,7 +493,7 @@ fn a_fee_token_never_shorts_the_authority() {
     // Taking the fee token: the user gives up exactly the limit, the merchant gets it less the fee
     let limits = [limit(&user_fee_key, &fee, 10 * USDC, MONTHLY)];
     let bytes = encode(&terms(&u, Some(&m), None, &limits, None));
-    f.send(&[create(&owner, &owner, &bytes, None)], &[&user.key])
+    f.send(&[create(&owner, &owner, &bytes)], &[&user.key])
         .unwrap();
     let accounts = (user_fee, mint, merchant_fee);
     let ix = pull(
@@ -442,7 +519,7 @@ fn a_fee_token_never_shorts_the_authority() {
         decay: None,
     };
     let bytes = encode(&terms(&u, None, None, &limits, Some(price)));
-    f.send(&[create(&owner, &owner, &bytes, None)], &[&user.key])
+    f.send(&[create(&owner, &owner, &bytes)], &[&user.key])
         .unwrap();
     let take = (user.usdc, f.usdc, merchant.usdc);
     let pay = Some((merchant_fee, mint, user_fee));
@@ -499,7 +576,7 @@ fn random_pulls_never_pass_a_limit() {
         let mut terms = terms(&u, Some(&m), None, &limits, None);
         terms.salt = salt;
         let bytes = encode(&terms);
-        let create = create(&user.address(), &user.address(), &bytes, None);
+        let create = create(&user.address(), &user.address(), &bytes);
         f.send(&[create], &[&user.key]).unwrap();
 
         let (mut consumed, mut rolled) = (vec![0u64; count], 0i64);

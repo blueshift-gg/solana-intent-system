@@ -13,9 +13,9 @@ export type Terms = {
     /** Who may pull. `null` is anyone, which is only valid with a price. */
     spender: Address | null;
     notBefore: number;
-    /** `null` runs until revoked. Terms that are signed, not sent as a transaction, must expire. */
+    /** `null` runs until closed. A signed intent must expire. */
     notAfter: number | null;
-    /** Tells apart mandates whose terms are otherwise identical. */
+    /** Tells apart otherwise identical terms. For a signed intent it is also the nonce. */
     salt: string;
     limits: Limit[];
     price: Price | null;
@@ -82,13 +82,12 @@ export async function mandateId(bytes: Uint8Array): Promise<Uint8Array> {
     return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
 }
 
-/** A fresh salt: the same terms can be approved again after a revocation. */
+/** A fresh salt: a new mandate for the same terms, or a new nonce for a signed intent. */
 export const randomSalt = (): string => crypto.getRandomValues(new BigUint64Array(1))[0].toString();
 
 /**
  * A subscription: only `merchant` may take, at most `amount` in every period,
- * from the subscriber's account. Without `end` it runs until revoked and must
- * be created by transaction; with `end` it can be signed instead.
+ * from the subscriber's account, until it is closed or `end` passes.
  */
 export function subscriptionTerms(p: {
     subscriber: Address;

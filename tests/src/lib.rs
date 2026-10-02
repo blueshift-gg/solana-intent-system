@@ -237,49 +237,29 @@ pub fn mandate_pda(authority: &Address, bytes: &[u8]) -> Address {
     pda(&[MANDATE_SEED, authority.as_ref(), &mandate_id(bytes)])
 }
 
-/// Put a mandate on chain, rent from `payer`. With a `signature` over the
-/// text the authority signs nothing here; the text names `mints`.
-pub fn create(
-    authority: &Address,
-    payer: &Address,
-    bytes: &[u8],
-    signature: Option<(&[u8; 64], &[Address])>,
-) -> Instruction {
-    let mut accounts = vec![
-        AccountMeta::new_readonly(*authority, signature.is_none()),
-        AccountMeta::new(*payer, true),
-        AccountMeta::new(mandate_pda(authority, bytes), false),
-        AccountMeta::new_readonly(SYSTEM, false),
-        AccountMeta::new_readonly(ENGINE_KEY, false),
-        AccountMeta::new_readonly(PROGRAM, false),
-    ];
-    let mut data = [&[0][..], &(bytes.len() as u16).to_le_bytes(), bytes].concat();
-    if let Some((signature, mints)) = signature {
-        accounts.extend(mints.iter().map(|m| AccountMeta::new_readonly(*m, false)));
-        data.extend(signature);
-    }
+/// Put a mandate on chain: the authority signs, `payer` funds the rent.
+pub fn create(authority: &Address, payer: &Address, bytes: &[u8]) -> Instruction {
     Instruction {
         program_id: PROGRAM,
-        accounts,
-        data,
+        accounts: vec![
+            AccountMeta::new_readonly(*authority, true),
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(mandate_pda(authority, bytes), false),
+            AccountMeta::new_readonly(SYSTEM, false),
+            AccountMeta::new_readonly(ENGINE_KEY, false),
+            AccountMeta::new_readonly(PROGRAM, false),
+        ],
+        data: [&[0][..], bytes].concat(),
     }
 }
 
-/// `spender` takes `amount` from `from` into `to`. With a price it pays from
-/// `payment.0` into `payment.2`, the account the terms name, in `payment.1`.
-#[allow(clippy::too_many_arguments)]
-pub fn pull(
-    spender: &Address,
-    authority: &Address,
-    bytes: &[u8],
-    (from, mint, to): (Address, Address, Address),
-    amount: u64,
-    payment: Option<(Address, Address, Address)>,
-    token_program: Address,
-) -> Instruction {
+/// `(from, mint, to)`: the token account taken from, its mint, and where the tokens go.
+pub type Take = (Address, Address, Address);
+/// `(pay_from, pay_mint, pay_to)`: the spender's account, the price's mint, the account the terms name.
+pub type Pay = (Address, Address, Address);
+
+fn legs((from, mint, to): Take, payment: Option<Pay>, token_program: Address) -> Vec<AccountMeta> {
     let mut accounts = vec![
-        AccountMeta::new_readonly(*spender, true),
-        AccountMeta::new(mandate_pda(authority, bytes), false),
         AccountMeta::new(from, false),
         AccountMeta::new_readonly(mint, false),
         AccountMeta::new(to, false),
@@ -294,6 +274,24 @@ pub fn pull(
             AccountMeta::new(pay_to, false),
         ]);
     }
+    accounts
+}
+
+/// `spender` takes `amount` under a mandate, paying its price if it has one.
+pub fn pull(
+    spender: &Address,
+    authority: &Address,
+    bytes: &[u8],
+    take: Take,
+    amount: u64,
+    payment: Option<Pay>,
+    token_program: Address,
+) -> Instruction {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*spender, true),
+        AccountMeta::new(mandate_pda(authority, bytes), false),
+    ];
+    accounts.extend(legs(take, payment, token_program));
     Instruction {
         program_id: PROGRAM,
         accounts,
@@ -301,13 +299,59 @@ pub fn pull(
     }
 }
 
-/// End a mandate; its rent goes to `payer`, the account that paid it.
-pub fn close(closer: &Address, authority: &Address, bytes: &[u8], payer: &Address) -> Instruction {
+/// The page of nonces for intents of `authority` that expire at `not_after`.
+pub fn nonces_pda(authority: &Address, not_after: i64) -> Address {
+    let day = not_after.div_euclid(NONCE_DAY).to_le_bytes();
+    pda(&[NONCES_SEED, authority.as_ref(), &day])
+}
+
+/// `spender` runs a signed intent once, taking `amount`. It pays for the page of nonces.
+pub fn fill(
+    spender: &Address,
+    terms: &Terms,
+    signature: &[u8; 64],
+    take: Take,
+    amount: u64,
+    payment: Option<Pay>,
+) -> Instruction {
+    let authority = Address::new_from_array(*terms.authority);
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*spender, true),
+        AccountMeta::new(*spender, true),
+        AccountMeta::new(nonces_pda(&authority, terms.not_after.unwrap()), false),
+        AccountMeta::new_readonly(SYSTEM, false),
+    ];
+    accounts.extend(legs(take, payment, TOKEN));
+    Instruction {
+        program_id: PROGRAM,
+        accounts,
+        data: [&[10][..], &amount.to_le_bytes(), signature, &encode(terms)].concat(),
+    }
+}
+
+/// The authority uses up an intent's nonce, so it can never be filled.
+pub fn cancel(authority: &Address, not_after: i64, salt: u64) -> Instruction {
+    Instruction {
+        program_id: PROGRAM,
+        accounts: vec![
+            AccountMeta::new_readonly(*authority, true),
+            AccountMeta::new(*authority, true),
+            AccountMeta::new(nonces_pda(authority, not_after), false),
+            AccountMeta::new_readonly(SYSTEM, false),
+            AccountMeta::new_readonly(ENGINE_KEY, false),
+            AccountMeta::new_readonly(PROGRAM, false),
+        ],
+        data: [&[11][..], &not_after.to_le_bytes(), &salt.to_le_bytes()].concat(),
+    }
+}
+
+/// Close a mandate or a page of nonces; its rent goes to `payer`, the account that paid it.
+pub fn close(closer: &Address, account: &Address, payer: &Address) -> Instruction {
     Instruction {
         program_id: PROGRAM,
         accounts: vec![
             AccountMeta::new_readonly(*closer, true),
-            AccountMeta::new(mandate_pda(authority, bytes), false),
+            AccountMeta::new(*account, false),
             AccountMeta::new(*payer, false),
             AccountMeta::new_readonly(ENGINE_KEY, false),
             AccountMeta::new_readonly(PROGRAM, false),

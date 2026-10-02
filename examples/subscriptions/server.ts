@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { decode, fetchMandate, getCreateInstruction, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
+import { decode, fetchMandate, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
 import {
     address,
     type Address,
@@ -43,9 +43,8 @@ type Payment = { amount: string; at: number; signature: string };
 type Member = {
     address: Address;
     plan: string;
-    /** Canonical terms; `signature` is absent when the member created the mandate on chain. */
+    /** Canonical terms of the mandate the member created on chain. */
     terms: Uint8Array;
-    signature?: Uint8Array;
     since: number;
     paidThrough: number;
     status: 'active' | 'past_due' | 'cancelled';
@@ -105,12 +104,7 @@ export function fathom(): Plugin {
         const { signer, usdc } = await ready;
         const plan = PLANS.find((p) => p.id === member.plan)!;
         const from = decode(member.terms).limits[0].from;
-        // A signed approval goes on chain with the first charge; after that it is a mandate like any other
-        const create =
-            member.signature && !(await fetchMandate(rpc, member.terms, await clock()))
-                ? [await getCreateInstruction({ mints: [USDC], payer: signer, signature: member.signature, terms: member.terms })]
-                : [];
-        const instructions = [...create, await getPullInstruction({ amount: plan.price, from, spender: signer, terms: member.terms, to: usdc })];
+        const instructions = [await getPullInstruction({ amount: plan.price, from, spender: signer, terms: member.terms, to: usdc })];
         const { value: blockhash } = await rpc.getLatestBlockhash().send();
         const tx = await signTransactionMessageWithSigners(
             pipe(
@@ -138,10 +132,8 @@ export function fathom(): Plugin {
 
     /** Whether the member withdrew the approval on chain: the chain, not our database, is the record. */
     async function withdrawn(member: Member) {
-        const mandate = await fetchMandate(rpc, member.terms, await clock());
-        // A signed approval is not on chain before its first charge; one created by transaction is closed when cancelled
-        if (!mandate) return !member.signature;
-        return mandate.revoked;
+        // Cancelling closes the mandate
+        return (await fetchMandate(rpc, member.terms, await clock())) === null;
     }
 
     /** Bring one member up to date: notice a cancellation, charge a period that is due. */
@@ -178,7 +170,6 @@ export function fathom(): Plugin {
         payments: m.payments,
         plan: m.plan,
         reason: m.reason,
-        signed: !!m.signature,
         since: m.since,
         status: m.status,
         terms: b64(m.terms),
@@ -209,7 +200,6 @@ export function fathom(): Plugin {
                                 paidThrough: now,
                                 payments: [],
                                 plan: input.plan,
-                                signature: input.signature ? bytes(input.signature) : undefined,
                                 since: now,
                                 status: 'active',
                                 terms: bytes(input.terms),

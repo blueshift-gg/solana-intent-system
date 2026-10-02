@@ -1,11 +1,64 @@
 use crate::events::emit;
 use crate::helpers::{balance, transfer};
-use crate::state::load;
+use crate::state::mandate;
+use mandate_core::errors::MandateError;
 use mandate_core::terms::Terms;
-use mandate_core::{constants::*, errors::MandateError};
 use pinocchio::log::sol_log;
 use pinocchio::sysvars::{clock::Clock, Sysvar};
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+
+/// The accounts a pull moves tokens between, shared by `Pull` and `Fill`.
+pub struct Legs<'a> {
+    pub spender: &'a AccountInfo,
+    pub from: &'a AccountInfo,
+    pub mint: &'a AccountInfo,
+    pub to: &'a AccountInfo,
+    pub engine: &'a AccountInfo,
+    /// `[pay_from, pay_mint, pay_to]` when the terms have a price.
+    pub payment: &'a [AccountInfo],
+}
+
+impl Legs<'_> {
+    /// Only inside the window, and only by the spender the terms name.
+    pub fn check(&self, terms: &Terms, now: i64) -> ProgramResult {
+        if now < terms.not_before {
+            return Err(MandateError::NotYetValid.into());
+        }
+        if terms.not_after.is_some_and(|t| now >= t) {
+            return Err(MandateError::Expired.into());
+        }
+        if terms.spender.is_some_and(|s| s.ne(self.spender.key())) {
+            return Err(MandateError::InvalidSpender.into());
+        }
+        Ok(())
+    }
+
+    /// Take `amount` as the delegate, only from the authority's own account.
+    /// If the terms have a price the spender pays it, and the authority must
+    /// receive all of it. Returns what was paid.
+    pub fn settle(&self, terms: &Terms, amount: u64, now: i64) -> Result<u64, ProgramError> {
+        balance(self.from, self.mint.key(), terms.authority)?;
+        transfer(self.from, self.mint, self.to, self.engine, amount)?;
+
+        let Some(price) = terms.price else {
+            return Ok(0);
+        };
+        let [pay_from, pay_mint, pay_to, ..] = self.payment else {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        };
+        if price.to.ne(pay_to.key()) || price.mint.ne(pay_mint.key()) {
+            return Err(MandateError::InvalidTarget.into());
+        }
+        let due = price.due(amount, now)?;
+        let before = balance(pay_to, price.mint, terms.authority)?;
+        transfer(pay_from, pay_mint, pay_to, self.spender, due)?;
+        let after = balance(pay_to, price.mint, terms.authority)?;
+        if after.checked_sub(before).is_none_or(|got| got < due) {
+            return Err(MandateError::PriceNotPaid.into());
+        }
+        Ok(due)
+    }
+}
 
 /// # Pull
 ///
@@ -13,11 +66,10 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 /// mandate has a price, the spender pays it to the authority here, in the same
 /// instruction: there is nothing in between to trust. Callable by CPI.
 ///
-/// > Check the mandate is live, in its window, and the signer may spend
-/// > Check the amount against every limit on the source
+/// > Check the window and the spender
+/// > Check the amount against every limit on the source, and record it
 /// > Transfer from the source, as the engine delegate
 /// > Price: transfer the payment from the spender, and check what arrived
-/// > Record what each limit has consumed
 ///
 /// Accounts:
 ///
@@ -53,15 +105,9 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 /// - amount: u64,
 /// - paid: u64,
 pub struct Pull<'a> {
-    pub spender: &'a AccountInfo,
     pub mandate: &'a AccountInfo,
-    pub from: &'a AccountInfo,
-    pub mint: &'a AccountInfo,
-    pub to: &'a AccountInfo,
-    pub engine: &'a AccountInfo,
     pub program: &'a AccountInfo,
-    /// `[pay_from, pay_mint, pay_to]` when the mandate has a price.
-    pub payment: &'a [AccountInfo],
+    pub legs: Legs<'a>,
     pub amount: u64,
 }
 
@@ -86,14 +132,16 @@ impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Pull<'a> {
         }
 
         Ok(Self {
-            spender,
             mandate,
-            from,
-            mint,
-            to,
-            engine,
             program,
-            payment,
+            legs: Legs {
+                spender,
+                from,
+                mint,
+                to,
+                engine,
+                payment,
+            },
             amount: u64::from_le_bytes(
                 data.try_into()
                     .map_err(|_| ProgramError::InvalidInstructionData)?,
@@ -107,31 +155,19 @@ impl<'a> Pull<'a> {
 
     pub fn process(&mut self) -> ProgramResult {
         let now = Clock::get()?.unix_timestamp;
-        let amount = self.amount;
+        let (legs, amount) = (&self.legs, self.amount);
 
-        // Only a live mandate, inside its window, by its spender
-        let (mandate, bytes) = load(self.mandate)?;
-        if mandate.flags() & REVOKED != 0 {
-            return Err(MandateError::Revoked.into());
-        }
+        let (mandate, bytes) = mandate(self.mandate)?;
         let terms = Terms::decode(bytes)?;
-        if now < terms.not_before {
-            return Err(MandateError::NotYetValid.into());
-        }
-        if terms.not_after.is_some_and(|t| now >= t) {
-            return Err(MandateError::Expired.into());
-        }
-        if terms.spender.is_some_and(|s| s.ne(self.spender.key())) {
-            return Err(MandateError::InvalidSpender.into());
-        }
+        legs.check(&terms, now)?;
 
         // The amount must fit every limit on the source. Each limit's count is
         // written back as of now, so one timestamp serves all of them
         let mut covered = false;
         for (k, limit) in terms.limits().iter().enumerate() {
             let mut spent = mandate.ledger.spent(k, limit.per, terms.not_before, now);
-            if limit.from.eq(self.from.key()) {
-                if limit.mint.ne(self.mint.key()) {
+            if limit.from.eq(legs.from.key()) {
+                if limit.mint.ne(legs.mint.key()) {
                     return Err(MandateError::InvalidTarget.into());
                 }
                 spent = spent.checked_add(amount).ok_or(MandateError::Overflow)?;
@@ -147,36 +183,16 @@ impl<'a> Pull<'a> {
         }
         mandate.ledger.set_rolled(now);
 
-        // Take, as the delegate, only from the authority's own account
-        balance(self.from, self.mint.key(), terms.authority)?;
-        transfer(self.from, self.mint, self.to, self.engine, amount)?;
-
-        // The spender pays the price, and the authority must receive all of it
-        let mut paid = 0;
-        if let Some(price) = terms.price {
-            let [pay_from, pay_mint, pay_to, ..] = self.payment else {
-                return Err(ProgramError::NotEnoughAccountKeys);
-            };
-            if price.to.ne(pay_to.key()) || price.mint.ne(pay_mint.key()) {
-                return Err(MandateError::InvalidTarget.into());
-            }
-            paid = price.due(amount, now)?;
-            let before = balance(pay_to, price.mint, terms.authority)?;
-            transfer(pay_from, pay_mint, pay_to, self.spender, paid)?;
-            let after = balance(pay_to, price.mint, terms.authority)?;
-            if after.checked_sub(before).is_none_or(|got| got < paid) {
-                return Err(MandateError::PriceNotPaid.into());
-            }
-        }
+        let paid = legs.settle(&terms, amount, now)?;
 
         // Log the Pull Event
         emit(
-            self.engine,
+            legs.engine,
             self.program,
             *Self::DISCRIMINATOR,
             &[
                 self.mandate.key(),
-                self.spender.key(),
+                legs.spender.key(),
                 &amount.to_le_bytes(),
                 &paid.to_le_bytes(),
             ],

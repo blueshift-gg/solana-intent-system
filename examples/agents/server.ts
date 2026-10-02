@@ -1,6 +1,6 @@
 // The paid API, as its provider would run it: "Inference API" sells on-chain
 // analytics per request over HTTP 402. An agent pays with the budget its
-// owner signed; the server checks the budget pays this API, settles the price
+// owner approved on chain; the server checks the budget pays this API, settles the price
 // on chain with the Mandate program, then serves the data. Real mainnet data,
 // read from the Surfpool fork.
 //
@@ -10,7 +10,7 @@ import os from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { decode, fetchMandate, getCreateInstruction, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
+import { decode, getPullInstruction, loadMandate, mandateError } from '@mandate/sdk';
 import {
     address,
     type Address,
@@ -68,15 +68,10 @@ type Party = Awaited<ReturnType<typeof party>>;
 
 let lastBlockhash = '';
 
-/** Settle: pull `amount` from the payer to `to` under the signed budget. The program decides. */
+/** Settle: pull `amount` from the payer to `to` under the budget Alice put on chain. The program decides. */
 async function settle(executor: Party, budget: Budget, to: Address, amount: bigint) {
     const from = decode(budget.terms).limits[0].from;
-    // The first settlement puts the signed budget on chain; every later one is a single Pull
-    const now = Number((await fetchSysvarClock(rpc)).unixTimestamp);
-    const create = (await fetchMandate(rpc, budget.terms, now))
-        ? []
-        : [await getCreateInstruction({ mints: [USDC], payer: executor.signer, signature: budget.signature, terms: budget.terms })];
-    const instructions = [...create, await getPullInstruction({ amount, from, spender: executor.signer, terms: budget.terms, to })];
+    const instructions = [await getPullInstruction({ amount, from, spender: executor.signer, terms: budget.terms, to })];
     // Each settlement must be a new transaction: wait for a fresh blockhash
     let { value: blockhash } = await rpc.getLatestBlockhash().send();
     while (blockhash.blockhash === lastBlockhash) {
@@ -108,7 +103,7 @@ async function settle(executor: Party, budget: Budget, to: Address, amount: bigi
     }
 }
 
-type Budget = { terms: Uint8Array; signature: Uint8Array };
+type Budget = { terms: Uint8Array };
 const bytes = (b64: string) => new Uint8Array(getBase64Encoder().encode(b64));
 
 async function body(req: IncomingMessage) {
@@ -136,7 +131,7 @@ export function paidApi(): Plugin {
         return { mallory, provider };
     })();
     // What the owner's phone has approved, shared with the screen
-    const shared: { alice?: Address; budget?: { terms: string; signature: string } } = {};
+    const shared: { alice?: Address; budget?: { terms: string } } = {};
 
     return {
         configureServer(server) {
@@ -170,7 +165,7 @@ export function paidApi(): Plugin {
 
                             // Verify: the budget must pay this API, then let the program settle it
                             const payment = JSON.parse(Buffer.from(header, 'base64').toString());
-                            const budget = { signature: bytes(payment.signature), terms: bytes(payment.terms) };
+                            const budget = { terms: bytes(payment.terms) };
                             if (decode(budget.terms).spender !== provider.signer.address) return reply(res, 402, { ...requirement, error: 'This budget does not name this API as its spender' });
                             const settled = await settle(provider, budget, provider.usdc, PRICE);
                             if (!settled.ok) return reply(res, 402, { ...requirement, error: settled.reason });
@@ -181,7 +176,7 @@ export function paidApi(): Plugin {
                         case '/mallory': {
                             // A prompt-injected agent sends its payment header to Mallory, who tries to collect with it
                             const payment = await body(req);
-                            const budget = { signature: bytes(payment.signature), terms: bytes(payment.terms) };
+                            const budget = { terms: bytes(payment.terms) };
                             const attempt = await settle(mallory, budget, mallory.usdc, PRICE * 2n);
                             return reply(res, attempt.ok ? 200 : 402, attempt);
                         }

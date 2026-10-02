@@ -4,24 +4,20 @@ import {
     fetchMandate,
     getCloseInstruction,
     getCreateInstruction,
+    mandateAddress,
     getEnableInstruction,
     subscriptionTerms,
     text,
 } from '@mandate/sdk';
-import type { SolanaSignMandateFeature } from '@mandate/wallet-standard-features';
-import type { SolanaSignOffchainMessageFeature } from '@solana/wallet-standard-features';
 import { address, type Address, type TransactionModifyingSigner, type TransactionSigner } from '@solana/kit';
 import { useWalletAccountTransactionSigner } from '@solana/react';
 import { fetchMaybeToken } from '@solana-program/token';
-import { getWalletFeature, type UiWallet, type UiWalletAccount, useConnect, useWallets } from '@wallet-standard/react';
-import { getWalletAccountForUiWalletAccount } from '@wallet-standard/ui-registry';
+import { type UiWallet, type UiWalletAccount, useConnect, useWallets } from '@wallet-standard/react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Report } from '../reports.ts';
 import { api, ata, b64, DAY, day, now, rpc, send, short, unb64, USDC, usd } from './chain.ts';
 
-const SIGN_MANDATE = 'solana:signMandate';
-const SIGN_OFFCHAIN = 'solana:signOffchainMessage';
 
 type Plan = { id: string; name: string; price: string; period: number; perks: string[] };
 type Config = { clock: number; merchant: Address; merchantUsdc: Address; plans: Plan[] };
@@ -30,7 +26,6 @@ type Membership = {
     status: 'active' | 'past_due' | 'cancelled';
     since: number;
     paidThrough: number;
-    signed: boolean;
     terms: string;
     reason?: string;
     payments: { amount: string; at: number; signature: string }[];
@@ -254,49 +249,21 @@ function Checkout({ config, plan, onConnect, close, done }: { config: Config; pl
             if (!token.exists || token.data.amount < BigInt(plan.price)) throw new Error(`Your wallet needs at least ${usd(plan.price)} in USDC`);
             const enabled = token.data.delegate.__option === 'Some' && token.data.delegate.value === ENGINE_ADDRESS;
             const enable = enabled ? [] : [getEnableInstruction({ account: source, owner: signer })];
-            // Best first: the wallet renders the terms; else it signs our text; else it signs a transaction.
-            // A signed approval must expire, so it lasts a year; one made by transaction runs until cancelled
-            const how = ([SIGN_MANDATE, SIGN_OFFCHAIN] as const).find((f) => account.features.includes(f));
-            const signs = !!how;
-            const start = await now();
             const terms = encode(subscriptionTerms({
                 account: source,
                 amount: BigInt(plan.price),
-                end: signs ? start + 365 * DAY : undefined,
                 merchant: config.merchant,
                 mint: USDC,
                 period: plan.period,
-                start,
+                start: await now(),
                 subscriber: me,
             }));
-
-            let signature: string | undefined;
-            if (signs) {
-                // A signature, no transaction and no fee. A mandate-aware wallet renders the terms itself.
-                if (enable.length) {
-                    setStep('Turning on USDC payments in your wallet…');
-                    await send(signer, enable);
-                }
-                setStep('Approve the membership in your wallet…');
-                const raw = getWalletAccountForUiWalletAccount(account);
-                const [output] =
-                    how === SIGN_MANDATE
-                        ? await (getWalletFeature(account, SIGN_MANDATE) as SolanaSignMandateFeature[typeof SIGN_MANDATE]).signMandate({ account: raw, terms })
-                        : await (getWalletFeature(account, SIGN_OFFCHAIN) as SolanaSignOffchainMessageFeature[typeof SIGN_OFFCHAIN]).signOffchainMessage({
-                              account: raw,
-                              message: text(terms, { [USDC]: 6 }),
-                              messageVersion: 1,
-                              requiredSigners: [raw.publicKey],
-                          });
-                signature = b64(new Uint8Array(output.signature));
-            } else {
-                // Any other wallet: create the same mandate with an ordinary transaction
-                setStep('Approve the membership in your wallet…');
-                await send(signer, [...enable, await getCreateInstruction({ authority: signer, payer: signer, terms })]);
-            }
+            // One transaction: turn on USDC payments if needed, and approve the membership
+            setStep('Approve the membership in your wallet…');
+            await send(signer, [...enable, await getCreateInstruction({ authority: signer, payer: signer, terms })]);
 
             setStep('Collecting your first month…');
-            await api('/subscribe', { address: me, plan: plan.id, signature, terms: b64(terms) });
+            await api('/subscribe', { address: me, plan: plan.id, terms: b64(terms) });
             await done();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -354,9 +321,9 @@ function Account({ config, membership, plan, refresh, choose, signOut }: { confi
         setError('');
         try {
             const terms = unb64(membership.terms);
-            // The rent goes back to whoever paid it: at once if the approval never expires, else after its expiry
+            // Closing ends it at once, and the rent goes back to whoever paid it
             const mandate = await fetchMandate(rpc, terms, await now());
-            await send(reader.signer, [await getCloseInstruction({ closer: reader.signer, payer: mandate?.payer ?? reader.me, terms })]);
+            await send(reader.signer, [getCloseInstruction({ account: await mandateAddress(terms), closer: reader.signer, payer: mandate?.payer ?? reader.me })]);
             await refresh();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -411,7 +378,7 @@ function Account({ config, membership, plan, refresh, choose, signOut }: { confi
             <section className="panel">
                 <h3>What you approved</h3>
                 <p className="quiet">
-                    {membership.signed ? 'You signed this once.' : 'You approved this on chain.'} It is the only thing Fathom can do with your wallet, and the network enforces every line.
+                    You approved this once, on chain. It is the only thing Fathom can do with your wallet, and the network enforces every line.
                 </p>
                 <pre>{approval}</pre>
             </section>

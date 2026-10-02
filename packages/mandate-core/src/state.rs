@@ -76,7 +76,6 @@ impl Ledger {
 #[repr(C)]
 pub struct Mandate {
     tag: [u8; 1],
-    flags: [u8; 1],
     pub ledger: Ledger,
     /// Paid the rent; refunded by `Close`.
     pub payer: Pubkey,
@@ -87,11 +86,38 @@ account!(Mandate);
 
 impl Mandate {
     field!(tag, set_tag, u8);
-    field!(flags, set_flags, u8);
     field!(terms_len, set_terms_len, u16);
+}
+
+/// The nonces an authority's signed intents have used, for intents that
+/// expire on one day. One bit each, so intents run in any order.
+#[repr(C)]
+pub struct Nonces {
+    tag: [u8; 1],
+    /// Paid the rent; refunded by `Close` once the day is over.
+    pub payer: Pubkey,
+    day: [u8; 8],
+    bits: [u8; NONCE_BITS / 8],
+}
+
+account!(Nonces);
+
+impl Nonces {
+    field!(tag, set_tag, u8);
+    field!(day, set_day, i64);
+
+    /// Mark `nonce` used; false if it already was.
+    pub fn take(&mut self, nonce: u64) -> bool {
+        let bit = (nonce % NONCE_BITS as u64) as usize;
+        let (byte, mask) = (&mut self.bits[bit / 8], 1 << (bit % 8));
+        let fresh = *byte & mask == 0;
+        *byte |= mask;
+        fresh
+    }
 }
 
 const _: () = {
     assert!(core::mem::size_of::<Ledger>() == LEDGER_LEN);
     assert!(core::mem::size_of::<Mandate>() == MANDATE_LEN);
+    assert!(core::mem::size_of::<Nonces>() == NONCES_LEN);
 };

@@ -41,9 +41,9 @@ Every row produces a mandate the same program enforces. Only the display differs
 - Render with the Mandate canonical renderer and sign
   `"\xffsolana offchain" ‖ 0x01 ‖ 0x01 ‖ authority ‖ text`.
 - Show the `SPENDER`, every `MAY TAKE` line and the `PRICE` line.
-- Refuse terms that are valid `until revoked`: the program only accepts a signature for terms that expire.
+- Refuse terms that are valid `until revoked`: a signed intent must expire.
 
-The enabling `Approve`, `Create` and `Close` are ordinary transactions, so
+The enabling `Approve`, and a mandate's `Create` and `Close`, are ordinary transactions, so
 they need no feature.
 
 ```sh

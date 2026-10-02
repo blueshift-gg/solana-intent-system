@@ -13,7 +13,7 @@ type Status = 'waiting' | 'working' | 'capped' | 'revoked';
 const REASONS: Record<string, { status: Status; say: string }> = {
     InvalidSpender: { say: 'only Inference API may spend this approval', status: 'working' },
     LimitExceeded: { say: 'daily budget used up', status: 'capped' },
-    Revoked: { say: 'Alice revoked the budget', status: 'revoked' },
+    InvalidAccountOwner: { say: 'Alice revoked the budget', status: 'revoked' },
 };
 
 export function Screen() {
@@ -42,7 +42,7 @@ export function Screen() {
         if (s.budget?.terms !== budgetRef.current?.terms) {
             budgetRef.current = s.budget;
             if (s.budget) {
-                say('note', 'Alice approved a budget on her phone', `Up to ${usd(s.perDay)} a day, only to Inference API. A signature: no transaction, no fee.`);
+                say('note', 'Alice approved a budget on her phone', `Up to ${usd(s.perDay)} a day, spendable only by Inference API. One transaction, then no popups.`);
                 setBoth('working');
             } else {
                 // A new Alice: start the demo over

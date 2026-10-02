@@ -15,7 +15,7 @@ pub enum MandateError {
     InvalidTag,
     /// The account is not the PDA for its seeds
     InvalidSeeds,
-    /// The mandate exists already: created, or revoked and not yet expired
+    /// The mandate exists already
     AlreadyInitialized,
 
     /// The terms bytes are not a canonical encoding
@@ -28,8 +28,10 @@ pub enum MandateError {
     InvalidAuthority,
     /// The signature does not cover the rendered terms
     InvalidSignature,
-    /// A signature can only create a mandate that expires
-    ExpiryRequired,
+    /// A signed intent must expire, and name one source account
+    InvalidIntent,
+    /// The intent's nonce was used: it ran already, or was cancelled
+    NonceUsed,
     /// A timestamp outside years 1970–9999 cannot be rendered
     Unrenderable,
 
@@ -39,9 +41,8 @@ pub enum MandateError {
     Expired,
     /// The signer is not the mandate's spender
     InvalidSpender,
-    /// The mandate was revoked
-    Revoked,
-    /// Only the authority or the spender may close a mandate before it expires
+    /// Only the authority or the spender may close a mandate before it expires,
+    /// and nobody may close a page of nonces before its day is over
     NotClosable,
     /// The account is not the one that paid the rent being refunded
     InvalidPayer,
@@ -76,12 +77,12 @@ impl MandateError {
         MandateError::WrongCluster,
         MandateError::InvalidAuthority,
         MandateError::InvalidSignature,
-        MandateError::ExpiryRequired,
+        MandateError::InvalidIntent,
+        MandateError::NonceUsed,
         MandateError::Unrenderable,
         MandateError::NotYetValid,
         MandateError::Expired,
         MandateError::InvalidSpender,
-        MandateError::Revoked,
         MandateError::NotClosable,
         MandateError::InvalidPayer,
         MandateError::InvalidPull,

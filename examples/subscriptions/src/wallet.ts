@@ -152,7 +152,7 @@ const wallet = {
                         const bytes = new Uint8Array(terms);
                         const approval = await describe(bytes);
                         if (decode(bytes).authority !== signer.address) throw new Error('This approval is for another account');
-                        // The program accepts a signature only for an approval that expires
+                        // A signed intent must expire
                         if (approval.never) throw new Error('An approval that never expires cannot be signed. Approve it with a transaction.');
                         await ask('Approve a spending limit', approval.rows, approval.text);
                         const signedOffchainMessage = message(bytes, approval.decimals);

@@ -1,5 +1,5 @@
-import { encode, ENGINE_ADDRESS, fetchMandate, getCloseInstruction, getCreateInstruction, getEnableInstruction, message, subscriptionTerms } from '@mandate/sdk';
-import { createKeyPairSignerFromPrivateKeyBytes, type KeyPairSigner, signBytes } from '@solana/kit';
+import { encode, ENGINE_ADDRESS, fetchMandate, getCloseInstruction, getCreateInstruction, getEnableInstruction, mandateAddress, subscriptionTerms } from '@mandate/sdk';
+import { createKeyPairSignerFromPrivateKeyBytes, type KeyPairSigner } from '@solana/kit';
 import { useEffect, useState } from 'react';
 
 import { api, b64, DAY, every, now, rpc, send, type Shared, unb64, usd, USDC, usdcAccount, usdcOf } from './chain.ts';
@@ -38,7 +38,8 @@ export function Phone() {
             if (mine) {
                 const mandate = await fetchMandate(rpc, unb64(shared.budget!.terms), shared.clock);
                 spent = mandate?.spent[0] ?? 0n;
-                revoked = !!mandate?.revoked;
+                // The budget is the mandate: closing it is revoking it
+                revoked = !mandate;
             }
             const enabled = !!token && token.delegate.__option === 'Some' && token.delegate.value === ENGINE_ADDRESS;
             setView({ enabled, mine, revoked, shared, spent, usdc: token?.amount ?? 0n });
@@ -59,30 +60,26 @@ export function Phone() {
     const approve = act('Approving', async () => {
         const account = await usdcAccount(me!.address);
         // Once per token: let Mandates use this USDC, $10 across every approval
-        if (!view!.enabled) await send(me!, [getEnableInstruction({ account, amount: 10_000_000n, owner: me! })]);
-        // A signed approval must expire: this one lasts 30 days
-        const start = await now();
+        const enable = view!.enabled ? [] : [getEnableInstruction({ account, amount: 10_000_000n, owner: me! })];
         const terms = encode(subscriptionTerms({
             account,
             amount: BigInt(view!.shared.perDay),
-            end: start + 30 * DAY,
+            end: (await now()) + 30 * DAY,
             merchant: view!.shared.provider,
             mint: USDC,
             period: DAY,
-            start,
+            start: await now(),
             subscriber: me!.address,
         }));
-        // A signature, not a transaction: the exact text the program re-renders
-        const signature = await signBytes(me!.keyPair.privateKey, message(terms, { [USDC]: 6 }));
-        await api('/budget', { signature: b64(signature), terms: b64(terms) });
+        // One transaction puts the budget on chain; after it the agent pays with no popups
+        await send(me!, [...enable, await getCreateInstruction({ authority: me!, payer: me!, terms })]);
+        await api('/budget', { terms: b64(terms) });
     });
 
     const revoke = act('Revoking', async () => {
         const terms = unb64(view!.shared.budget!.terms);
         const mandate = await fetchMandate(rpc, terms, await now());
-        // A budget the API has not used yet is not on chain: put it there, then close it
-        const create = mandate ? [] : [await getCreateInstruction({ authority: me!, payer: me!, terms })];
-        await send(me!, [...create, await getCloseInstruction({ closer: me!, payer: mandate?.payer ?? me!.address, terms })]);
+        if (mandate) await send(me!, [getCloseInstruction({ account: await mandateAddress(terms), closer: me!, payer: mandate.payer })]);
     });
 
     if (!me || !view) return <main className="phone-page"><p className="quiet">Opening Alice’s wallet…</p></main>;
@@ -110,8 +107,8 @@ export function Phone() {
                     <div className="clause take"><span>May spend</span><b>Up to {usd(perDay)} a day</b></div>
                     <div className="clause gain"><span>Only if</span><b>Every cent reaches Inference API</b></div>
                     <p className="quiet">{view.enabled
-                        ? 'A signature, not a transaction: no fee. Revoke any time.'
-                        : 'First time only: one transaction lets Mandates use your USDC, up to $10 in total. After that, every budget is just a signature.'}</p>
+                        ? 'One transaction puts the budget on chain. Revoke any time, and the rent comes back.'
+                        : 'First time only: one transaction lets Mandates use your USDC, up to $10 in total. The same transaction sets this budget.'}</p>
                     <button type="button" className="big go" disabled={!!busy} onClick={approve}>{busy || 'Approve'}</button>
                 </section>
             ) : (

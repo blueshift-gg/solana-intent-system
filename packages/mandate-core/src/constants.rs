@@ -33,16 +33,22 @@ pub const ENGINE_BUMP: u8 = 254;
 /// seed so nobody can pre-create another authority's mandate.
 pub const MANDATE_SEED: &[u8] = b"mandate";
 
-/// The first byte of a mandate account.
+/// Used nonces of signed intents: [NONCES_SEED, authority, day], where `day`
+/// is the intent's expiry in whole days, little-endian. Every intent in a
+/// page is dead once that day is over, so the page can then be closed.
+pub const NONCES_SEED: &[u8] = b"nonces";
+pub const NONCE_DAY: i64 = 86_400;
+/// Nonces in one page; an intent's nonce is its salt modulo this.
+pub const NONCE_BITS: usize = 1024;
+
+/// Account tags: the first byte of every account, one per type.
 pub const MANDATE_TAG: u8 = 1;
+pub const NONCES_TAG: u8 = 2;
 
 /// Self-CPI event instruction discriminator.
 pub const EVENT_DISCRIMINATOR: u8 = 255;
 
-/// Mandate flag: closed before its expiry. The account stays until then, so
-/// a signature over the same terms cannot create the mandate again.
-pub const REVOKED: u8 = 1;
-
 pub const LEDGER_LEN: usize = 8 + MAX_LIMITS * 8; // 72
 /// Fixed header; the canonical terms follow it.
-pub const MANDATE_LEN: usize = 2 + LEDGER_LEN + 32 + 2; // 108
+pub const MANDATE_LEN: usize = 1 + LEDGER_LEN + 32 + 2; // 107
+pub const NONCES_LEN: usize = 1 + 32 + 8 + NONCE_BITS / 8; // 169

@@ -1,31 +1,69 @@
-//! The mandate account view. Every `unsafe` needed to overlay the layout on
-//! account bytes lives here; handlers only see checked views.
+//! Account views. Every `unsafe` needed to overlay a layout on account bytes
+//! lives here; handlers only see checked views. The program never holds a
+//! checked borrow, so callers must not alias a view.
 
-pub use mandate_core::state::Mandate;
+use crate::helpers::{check_pda, create_pda};
+pub use mandate_core::state::{Mandate, Nonces};
 use mandate_core::{constants::*, errors::MandateError};
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError};
 
-/// A mandate's header and the canonical terms after it, after checking the
-/// account's owner, length and tag. The program never holds a checked borrow,
-/// so callers must not alias the header.
+/// The account's bytes, after checking its owner, length and tag.
 #[allow(clippy::mut_from_ref)]
-pub fn load(account: &AccountInfo) -> Result<(&mut Mandate, &[u8]), ProgramError> {
+fn bytes(account: &AccountInfo, len: usize, tag: u8) -> Result<&mut [u8], ProgramError> {
     if !account.is_owned_by(&crate::ID) {
         return Err(MandateError::InvalidAccountOwner.into());
     }
-    if account.data_len() < MANDATE_LEN {
+    if account.data_len() < len {
         return Err(MandateError::InvalidAccountLength.into());
     }
-    // SAFETY: length checked above; all fields have alignment 1.
-    let header = unsafe { Mandate::from_bytes_unchecked_mut(account.borrow_mut_data_unchecked()) };
-    if header.tag() != MANDATE_TAG {
+    // SAFETY: see the module doc; nothing else borrows the data.
+    let data = unsafe { account.borrow_mut_data_unchecked() };
+    if data[0] != tag {
         return Err(MandateError::InvalidTag.into());
     }
-    let end = MANDATE_LEN + header.terms_len() as usize;
-    // SAFETY: the terms lie after the header, so this view never overlaps `header`.
-    let data = unsafe { account.borrow_data_unchecked() };
-    let terms = data
-        .get(MANDATE_LEN..end)
+    Ok(data)
+}
+
+/// A mandate's header and the canonical terms after it.
+#[allow(clippy::mut_from_ref)]
+pub fn mandate(account: &AccountInfo) -> Result<(&mut Mandate, &[u8]), ProgramError> {
+    let (header, rest) = bytes(account, MANDATE_LEN, MANDATE_TAG)?.split_at_mut(MANDATE_LEN);
+    // SAFETY: `header` holds exactly the layout; all fields have alignment 1.
+    let header = unsafe { Mandate::from_bytes_unchecked_mut(header) };
+    let terms = rest
+        .get(..header.terms_len() as usize)
         .ok_or(MandateError::InvalidAccountLength)?;
     Ok((header, terms))
+}
+
+/// An existing page of nonces.
+#[allow(clippy::mut_from_ref)]
+pub fn nonces(account: &AccountInfo) -> Result<&mut Nonces, ProgramError> {
+    // SAFETY: length checked by `bytes`; all fields have alignment 1.
+    Ok(unsafe { Nonces::from_bytes_unchecked_mut(bytes(account, NONCES_LEN, NONCES_TAG)?) })
+}
+
+/// The page of nonces for intents of `authority` that expire at `not_after`,
+/// created with rent from `payer` if this is the first of its day.
+#[allow(clippy::mut_from_ref)]
+pub fn nonces_for<'a>(
+    payer: &AccountInfo,
+    account: &'a AccountInfo,
+    authority: &[u8; 32],
+    not_after: i64,
+) -> Result<&'a mut Nonces, ProgramError> {
+    // A page records nothing of its authority: its address is the proof
+    let day = not_after.div_euclid(NONCE_DAY);
+    let seeds: [&[u8]; 3] = [NONCES_SEED, authority, &day.to_le_bytes()];
+    let bump = check_pda(account, &seeds)?;
+    if account.is_owned_by(&crate::ID) {
+        return nonces(account);
+    }
+    create_pda(payer, account, NONCES_LEN, &seeds, bump)?;
+    // SAFETY: the account was just created with `NONCES_LEN` zeroed bytes.
+    let page = unsafe { Nonces::from_bytes_unchecked_mut(account.borrow_mut_data_unchecked()) };
+    page.set_tag(NONCES_TAG);
+    page.payer = *payer.key();
+    page.set_day(day);
+    Ok(page)
 }

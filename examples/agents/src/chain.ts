@@ -9,7 +9,7 @@ export const DAY = 86_400;
 /** What the server shares: the API, and what the owner's phone approved. */
 export type Shared = {
     alice?: Address;
-    budget?: { terms: string; signature: string };
+    budget?: { terms: string };
     perDay: string;
     price: string;
     provider: Address;
